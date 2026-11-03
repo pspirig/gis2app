@@ -15,11 +15,28 @@ let wfs = 'https://baug-ikg-gis-01.ethz.ch:8443/geoserver/GTA26_lab07/wfs';
 function drawMarkers() {
     if (map && appState.markers && appState.latLng && appState.radius) {
         appState.markers.clearLayers();
+
+        // Genauigkeitskreis: dezent im Hintergrund
         let circle = L.circle(appState.latLng, {
-            radius: appState.radius
+            radius: appState.radius,
+            stroke: false,
+            fillColor: '#3b7ddd',
+            fillOpacity: 0.15
         });
         appState.markers.addLayer(circle);
 
+        // Blauer Punkt mit weissem Rand (wie im Entwurf)
+        let dot = L.circleMarker(appState.latLng, {
+            radius: 8,
+            color: '#ffffff',
+            weight: 3,
+            fillColor: '#3b7ddd',
+            fillOpacity: 1,
+            className: 'location-dot'
+        });
+        appState.markers.addLayer(dot);
+
+        // Blickrichtung (optional – diesen Block löschen, falls nicht gewünscht)
         if (appState.heading !== null) {
             let radius = circle.getBounds().getCenter().lat - circle.getBounds().getSouth();
             let startPointLat = appState.latLng.lat - radius * Math.cos(appState.heading);
@@ -27,11 +44,11 @@ function drawMarkers() {
             let endPointLat = appState.latLng.lat - radius * 3 * Math.cos(appState.heading);
             let endPointLng = appState.latLng.lng - radius * 3 * Math.sin(appState.heading);
 
-            LatLngsHeading = [
+            let latLngsHeading = [
                 [startPointLat, startPointLng],
                 [endPointLat, endPointLng]
             ];
-            appState.markers.addLayer(L.polyline(LatLngsHeading, {color: 'rgb(255, 0, 0)'}));
+            appState.markers.addLayer(L.polyline(latLngsHeading, {color: '#3b7ddd'}));
         }
     }
 }
@@ -90,120 +107,115 @@ function onload() {
         errMsg.text(errMsg.text() + "DeviceOrientation ist leider nicht verfügbar. ");
         errMsg.show();
     }
-	
-	// Adding map layer
+
+    // Adding map layer: graue Landeskarte von swisstopo
     map = L.map('map').setView([47.376750, 8.540721], 16);
     appState.markers = L.layerGroup();
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    L.tileLayer('https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.swisstopo.admin.ch">swisstopo</a>'
     }).addTo(map);
     map.addLayer(appState.markers);
-	
-	
-	// ------- WFS -------
-	
-	// button to upload data (add POI)
-	$( "#uploadBtn" ).click(function() {
-		formSubmit();
-	});
-	
-	// For dialog form
-	$("#fillInFormDiv").dialog({
-		modal: true,
-		autoOpen: false,
-		height: 400,
-		width: 350,
-		close: function() {
-			$("#fillInForm").trigger("reset");
-			$(this).dialog("close");
-		}
-	});
 
-	$("#fillInBtn").on("click", function() {
-		$("#fillInForm").trigger("reset");
-		$("#fillInFormDiv").dialog("open");
-		$("#fillInFormDiv").parent().css('z-index', 500);
-	}); 
+
+    // ------- WFS -------
+
+    // button to upload data (add POI)
+    $("#uploadBtn").click(function () {
+        formSubmit();
+    });
+
+    // For dialog form
+    $("#fillInFormDiv").dialog({
+        modal: true,
+        autoOpen: false,
+        height: 400,
+        width: 350,
+        close: function () {
+            $("#fillInForm").trigger("reset");
+            $(this).dialog("close");
+        }
+    });
+
+    $("#fillInBtn").on("click", function () {
+        $("#fillInForm").trigger("reset");
+        $("#fillInFormDiv").dialog("open");
+        $("#fillInFormDiv").parent().css('z-index', 500);
+    });
 }
 
 // Shows a form for the user to enter POI name
 function formSubmit() {
-	console.log("submitted POI Name: "+$("#poiName").val());
+    console.log("submitted POI Name: " + $("#poiName").val());
     appState.name = $("#poiName").val();
-    //insertPoint(47.3, 8.5, "point2"); // hard coding example, comment this line and instead use the code on the next line
-	insertPoint(appState.latLng.lat, appState.latLng.lng, appState.name);
-	$("#fillInForm").trigger("reset");
-	$("#fillInFormDiv").dialog("close");
+    insertPoint(appState.latLng.lat, appState.latLng.lng, appState.name);
+    $("#fillInForm").trigger("reset");
+    $("#fillInFormDiv").dialog("close");
 }
 
 // Inserts the point in the database
+// TODO: Workspace "GTA26_lab07" und Layer "gta_u22_lab07" auf euer Projekt anpassen
 function insertPoint(lat, lng, name) {
-	// TODO: Declare a variable called postData and assign an appropriate value.
-    
-
     let postData =
         '<wfs:Transaction\n'
-    +   '   service="WFS"\n'
-    +   '   version="1.0.0"\n'
-    +   '   xmlns:wfs="http://www.opengis.net/wfs"\n'
-    +   '   xmlns:gml="http://www.opengis.net/gml"\n'
-    +   '   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
-    +   '   xmlns:GTA26_lab07="https://www.gis.ethz.ch/GTA26_lab07">\n'
-    +   '   <wfs:Insert>\n'
-    +   '       <GTA26_lab07:gta_u22_lab07>\n'
-    +   '           <lon>'+lng+'</lon>\n'
-    +   '           <lat>'+lat+'</lat>\n'
-    +   '           <name>'+name+'</name>\n'
-    +   '           <geometry>\n'
-    +   '               <gml:Point srsName="http://www.opengis.net/gml/srs/epsg.xml#4326">\n'
-    +   '                   <gml:coordinates decimal="." cs="," ts=" ">'+ lng + ',' + lat +'</gml:coordinates>\n'
-    +   '               </gml:Point>\n'
-    +   '           </geometry>\n'
-    +   '       </GTA26_lab07:gta_u22_lab07>\n'
-    +   '   </wfs:Insert>\n'
-    +   '</wfs:Transaction>'
-    
-	$.ajax({
-		type: "POST",
-		url: wfs,
-		dataType: "xml",
-		contentType: "text/xml",
-		data: postData,
-		success: function(response) {
-			console.log("AJAX request succeeded");
+        + '   service="WFS"\n'
+        + '   version="1.0.0"\n'
+        + '   xmlns:wfs="http://www.opengis.net/wfs"\n'
+        + '   xmlns:gml="http://www.opengis.net/gml"\n'
+        + '   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
+        + '   xmlns:GTA26_lab07="https://www.gis.ethz.ch/GTA26_lab07">\n'
+        + '   <wfs:Insert>\n'
+        + '       <GTA26_lab07:gta_u22_lab07>\n'
+        + '           <lon>' + lng + '</lon>\n'
+        + '           <lat>' + lat + '</lat>\n'
+        + '           <name>' + name + '</name>\n'
+        + '           <geometry>\n'
+        + '               <gml:Point srsName="http://www.opengis.net/gml/srs/epsg.xml#4326">\n'
+        + '                   <gml:coordinates decimal="." cs="," ts=" ">' + lng + ',' + lat + '</gml:coordinates>\n'
+        + '               </gml:Point>\n'
+        + '           </geometry>\n'
+        + '       </GTA26_lab07:gta_u22_lab07>\n'
+        + '   </wfs:Insert>\n'
+        + '</wfs:Transaction>';
 
-			// Check for WFS exception
-			let exception = $(response).find("ServiceException");
+    $.ajax({
+        type: "POST",
+        url: wfs,
+        dataType: "xml",
+        contentType: "text/xml",
+        data: postData,
+        success: function (response) {
+            console.log("AJAX request succeeded");
 
-			if (exception.length > 0) {
-				let msg = exception.text();
+            // Check for WFS exception
+            let exception = $(response).find("ServiceException");
 
-				console.error("WFS Transaction failed:");
-				console.error(msg);
+            if (exception.length > 0) {
+                let msg = exception.text();
+                console.error("WFS Transaction failed:");
+                console.error(msg);
+                alert("WFS Error:\n" + msg);
+                return;
+            }
 
-				alert("WFS Error:\n" + msg);
-				return;
-			}
+            // Check if transaction succeeded
+            let successNode = response.getElementsByTagName("wfs:SUCCESS");
 
-			// Check if transaction succeeded
-			let successNode = response.getElementsByTagName("wfs:SUCCESS");
+            if (successNode.length > 0) {
+                console.log("WFS Transaction successful");
+                alert("Data successfully inserted into database.");
+            } else {
+                console.log("Transaction response received, but success could not be verified.");
+                alert("Response received from Geoserver. Please check the response details.");
+            }
 
-			if (successNode.length > 0) {
-				console.log("WFS Transaction successful");
-				alert("Data successfully inserted into database.");
-			} else {
-				console.log("Transaction response received, but success could not be verified.");
-				alert("Response received from Geoserver. Please check the response details.");
-			}
-
-			console.log(new XMLSerializer().serializeToString(response));
-		},
-		error: function (xhr, errorThrown) {
-			console.error("AJAX Error");
-			console.error("HTTP Status:", xhr.status);
-			console.error(errorThrown);
-
-			alert("Connection to Geoserver failed.\n" + "HTTP Status: " + xhr.status);
-		}
-	});
+            console.log(new XMLSerializer().serializeToString(response));
+        },
+        error: function (xhr, errorThrown) {
+            console.error("AJAX Error");
+            console.error("HTTP Status:", xhr.status);
+            console.error(errorThrown);
+            alert("Connection to Geoserver failed.\n" + "HTTP Status: " + xhr.status);
+        }
+    });
 }
