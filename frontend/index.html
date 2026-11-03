@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Meta information are used by the browser and search engines, but are not visible to the user per se. -->
+    <meta charset="UTF-8">
+    <meta name="description" content="TESTVERSION">
+    <!-- anpassung screengrösse-->
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>GTA project G1: Safe Steps</title>
+
+    <!-- With "link rel stylesheet", you can import CSS files. -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin=""/>
+	<link rel="stylesheet" href="https://code.jquery.com/ui/1.14.0/themes/base/jquery-ui.css">
+    <link rel="stylesheet" href="css/style.css">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Anton&family=Source+Sans+3&display=swap" rel="stylesheet">
+	<!-- Add icon library - for button -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+
+    <!-- With script tags you can import JavaScript files. Defer makes sure that the browser does not wait until
+         the script is completely loaded, but instead executes it once the HTML is downloaded and parsed. -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"
+            integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo="
+            crossorigin="anonymous"></script>
+    <script src="https://code.jquery.com/ui/1.14.0/jquery-ui.min.js"
+            integrity="sha256-Fb0zP4jE3JHqu+IBB9YktLcSjI1Zc6J2b6gTjB0LpoM="
+            crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin="" defer></script>
+    <script src="js/app.js" defer></script>
+	
+</head>
+<body onload="onload()">
+<header>GTA Location Mapper</header>
+<div class="content" id= "main">
+    <div id="map"></div>
+	<button id="fillInBtn" class="btn"><i class="fa fa-plus"></i> New POI</button>
+	<div id="fillInFormDiv" title="New POI">
+		<p>Please fill in the form .</p>
+		<form onsubmit="formSubmit(); return false;" id="fillInForm" method="post">
+			<fieldset>
+				<label for="un" class="ui-hidden-accessible">POI Name:</label>
+				<input type="text" name="poiName" id="poiName" value="" placeholder="poiName" autocomplete="off" data-theme="a"/>
+				<input type="submit" value="Upload"/>
+			</fieldset>
+		</form>
+	</div>
+</div>
+
+<footer>
+    <div>
+        &copy; GTA G1 2026<br>
+        IKG @ ETH Zürich
+    </div>
+</footer>
+</body>
+</html>
