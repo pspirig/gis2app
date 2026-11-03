@@ -4,7 +4,8 @@ let appState = {
     latLng: null,
     radius: null,
     heading: null,
-    name: null
+    name: null,
+    hasCentered: false
 };
 
 let wfs = 'https://baug-ikg-gis-01.ethz.ch:8443/geoserver/GTA26_lab07/wfs';
@@ -64,8 +65,10 @@ function geoSuccess(position) {
     appState.radius = position.coords.accuracy / 2;
     drawMarkers();
 
-    if (map) {
-        map.setView(appState.latLng);
+    // Nur beim allerersten Standort automatisch hinspringen
+    if (map && !appState.hasCentered) {
+        map.setView(appState.latLng, 17);
+        appState.hasCentered = true;
     }
 }
 
@@ -109,7 +112,13 @@ function onload() {
     }
 
     // Adding map layer: graue Landeskarte von swisstopo
-    map = L.map('map').setView([47.376750, 8.540721], 16);
+    map = L.map('map', { zoomControl: false }).setView([47.376750, 8.540721], 16);
+
+    // Knopf «zu meinem Standort» oben rechts
+    map.addControl(new LocateControl());
+
+    // Zoom-Knöpfe oben rechts (erscheinen unter dem Standort-Knopf)
+    L.control.zoom({ position: 'topright' }).addTo(map);
     appState.markers = L.layerGroup();
     L.tileLayer('https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg', {
         maxZoom: 19,
@@ -118,39 +127,82 @@ function onload() {
     map.addLayer(appState.markers);
 
 
-    // ------- WFS -------
+    // ------- Fenster «Meldung erfassen» -------
 
-    // button to upload data (add POI)
-    $("#uploadBtn").click(function () {
-        formSubmit();
-    });
+    // Öffnen
+    $("#fillInBtn").on("click", openModal);
 
-    // For dialog form
-    $("#fillInFormDiv").dialog({
-        modal: true,
-        autoOpen: false,
-        height: 400,
-        width: 350,
-        close: function () {
-            $("#fillInForm").trigger("reset");
-            $(this).dialog("close");
+    // Schliessen über das X
+    $("#closeModalBtn").on("click", closeModal);
+
+    // Schliessen per Klick auf den dunklen Hintergrund
+    $("#poiModal").on("click", function (event) {
+        if (event.target === this) {
+            closeModal();
         }
     });
 
-    $("#fillInBtn").on("click", function () {
-        $("#fillInForm").trigger("reset");
-        $("#fillInFormDiv").dialog("open");
-        $("#fillInFormDiv").parent().css('z-index', 500);
+    // Absenden
+    $("#fillInForm").on("submit", function (event) {
+        event.preventDefault();
+        formSubmit();
     });
 }
 
-// Shows a form for the user to enter POI name
-function formSubmit() {
-    console.log("submitted POI Name: " + $("#poiName").val());
-    appState.name = $("#poiName").val();
-    insertPoint(appState.latLng.lat, appState.latLng.lng, appState.name);
+function openModal() {
     $("#fillInForm").trigger("reset");
-    $("#fillInFormDiv").dialog("close");
+    $("#poiModal").removeClass("hidden");
+}
+
+function closeModal() {
+    $("#poiModal").addClass("hidden");
+    $("#fillInForm").trigger("reset");
+}
+
+// Liest das Formular aus und schickt die Meldung an die Datenbank
+function formSubmit() {
+    if (!appState.latLng) {
+        alert("Dein Standort ist noch nicht bekannt. Bitte kurz warten.");
+        return;
+    }
+
+    let safety = $("#safety").val();
+    let categories = $("input[name='category']:checked")
+        .map(function () { return this.value; })
+        .get();
+    let remark = $("#remark").val().trim();
+
+    if (categories.length === 0) {
+        alert("Bitte mindestens eine Kategorie auswählen.");
+        return;
+    }
+
+    let report = {
+        safety: safety,
+        categories: categories,
+        remark: remark,
+        lat: appState.latLng.lat,
+        lng: appState.latLng.lng
+    };
+    console.log("Neue Meldung:", report);
+
+    // VORLÄUFIG: Die Übungstabelle hat nur das Feld «name».
+    // Darum schreiben wir alles zusammen hinein. Später mit eigener Tabelle → eigene Spalten.
+    let name = "Sicherheit " + safety + " | " + categories.join(", ") + (remark ? " | " + remark : "");
+    appState.name = name;
+
+    insertPoint(report.lat, report.lng, name);
+    closeModal();
+}
+
+// Sonderzeichen wie & < > würden das XML kaputt machen, darum ersetzen
+function escapeXml(text) {
+    return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&apos;");
 }
 
 // Inserts the point in the database
@@ -168,7 +220,7 @@ function insertPoint(lat, lng, name) {
         + '       <GTA26_lab07:gta_u22_lab07>\n'
         + '           <lon>' + lng + '</lon>\n'
         + '           <lat>' + lat + '</lat>\n'
-        + '           <name>' + name + '</name>\n'
+        + '           <name>' + escapeXml(name) + '</name>\n'
         + '           <geometry>\n'
         + '               <gml:Point srsName="http://www.opengis.net/gml/srs/epsg.xml#4326">\n'
         + '                   <gml:coordinates decimal="." cs="," ts=" ">' + lng + ',' + lat + '</gml:coordinates>\n'
@@ -219,3 +271,28 @@ function insertPoint(lat, lng, name) {
         }
     });
 }
+
+// ------- Standort-Knopf -------
+
+// Springt zurück zum eigenen Standort
+function goToMyLocation() {
+    if (appState.latLng) {
+        map.flyTo(appState.latLng, 17);
+    } else {
+        alert("Dein Standort ist noch nicht bekannt.");
+    }
+}
+
+// Eigener Leaflet-Knopf mit Pfeil
+const LocateControl = L.Control.extend({
+    options: { position: 'topright' },
+    onAdd: function () {
+        let btn = L.DomUtil.create('button', 'locate-btn');
+        btn.type = 'button';
+        btn.title = 'Zu meinem Standort';
+        btn.innerHTML = '<i class="fa-solid fa-location-arrow"></i>';
+        L.DomEvent.disableClickPropagation(btn);
+        L.DomEvent.on(btn, 'click', goToMyLocation);
+        return btn;
+    }
+});
