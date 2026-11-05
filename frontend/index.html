@@ -35,13 +35,36 @@
     <script src="js/app.js" defer></script>
 </head>
 <body onload="onload()">
-<header>GTA Location Mapper</header>
 
 <div class="content" id="main">
     <div id="map"></div>
+
+    <!-- Fehlermeldungen (z. B. Standort nicht verfügbar) -->
+    <div id="error-messages" class="error-messages"></div>
+
     <button id="fillInBtn" class="flag-btn" aria-label="Neue Meldung erfassen">
         <i class="fa-solid fa-flag"></i>
     </button>
+</div>
+
+<!-- ---------- Panel «Anzeigeoptionen» (schiebt sich von unten hoch) ---------- -->
+<div id="optionsSheet" class="sheet">
+    <button type="button" id="sheetHandle" class="sheet-header"
+            aria-expanded="false" aria-controls="sheetBody">
+        <span class="sheet-grip"></span>
+        <span class="sheet-title">Anzeigeoptionen</span>
+    </button>
+
+    <div id="sheetBody" class="sheet-body">
+        <label class="toggle-row">
+            <span>Vergangene Meldungen</span>
+            <input type="checkbox" id="toggleReports" class="toggle" checked>
+        </label>
+        <label class="toggle-row">
+            <span>Standort anzeigen</span>
+            <input type="checkbox" id="toggleLocation" class="toggle" checked>
+        </label>
+    </div>
 </div>
 
 <!-- ---------- Fenster «Meldung erfassen» ---------- -->
@@ -107,11 +130,5 @@
     </div>
 </div>
 
-<footer>
-    <div>
-        &copy; GTA G1 2026<br>
-        IKG @ ETH Zürich
-    </div>
-</footer>
 </body>
 </html>

@@ -1,6 +1,7 @@
 let map;
 let appState = {
-    markers: null,
+    markers: null,    // Ebene mit eigenem Standort (Punkt, Kreis, Blickrichtung)
+    reports: null,    // Ebene mit Meldungen (rote Fahnen)
     latLng: null,
     radius: null,
     heading: null,
@@ -120,11 +121,18 @@ function onload() {
     // Zoom-Knöpfe oben rechts (erscheinen unter dem Standort-Knopf)
     L.control.zoom({ position: 'topright' }).addTo(map);
     appState.markers = L.layerGroup();
+    appState.reports = L.layerGroup();
     L.tileLayer('https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg', {
         maxZoom: 19,
         attribution: '&copy; <a href="https://www.swisstopo.admin.ch">swisstopo</a>'
     }).addTo(map);
+    map.addLayer(appState.reports);
     map.addLayer(appState.markers);
+
+    // Panel schliessen, wenn man auf die Karte tippt
+    map.on("click", function () {
+        setSheetOpen(false);
+    });
 
 
     // ------- Fenster «Meldung erfassen» -------
@@ -147,9 +155,14 @@ function onload() {
         event.preventDefault();
         formSubmit();
     });
+
+
+    // ------- Panel «Anzeigeoptionen» -------
+    initOptionsSheet();
 }
 
 function openModal() {
+    setSheetOpen(false);
     $("#fillInForm").trigger("reset");
     $("#poiModal").removeClass("hidden");
 }
@@ -192,7 +205,80 @@ function formSubmit() {
     appState.name = name;
 
     insertPoint(report.lat, report.lng, name);
+
+    // Meldung sofort als Fahne auf der Karte zeigen
+    addReportMarker(report);
+
     closeModal();
+}
+
+// ------- Meldungen als rote Fahnen -------
+
+const flagIcon = L.divIcon({
+    className: 'report-flag',
+    html: '<i class="fa-solid fa-flag"></i>',
+    iconSize: [24, 24],
+    iconAnchor: [5, 22],   // Fuss der Fahnenstange steht auf dem Punkt
+    popupAnchor: [6, -22]
+});
+
+// Setzt eine Fahne für eine Meldung auf die Karte (Ebene «Vergangene Meldungen»)
+// TODO: Später alle Meldungen per WFS GetFeature aus der Datenbank laden
+//       und für jede Meldung diese Funktion aufrufen.
+function addReportMarker(report) {
+    let popup = "<b>Sicherheitsgefühl: " + escapeXml(report.safety) + "</b><br>"
+        + escapeXml(report.categories.join(", "))
+        + (report.remark ? "<br><i>" + escapeXml(report.remark) + "</i>" : "");
+
+    L.marker([report.lat, report.lng], { icon: flagIcon })
+        .bindPopup(popup)
+        .addTo(appState.reports);
+}
+
+// ------- Panel «Anzeigeoptionen» -------
+
+function initOptionsSheet() {
+    // Auf-/Zuklappen durch Tippen auf den Kopf
+    $("#sheetHandle").on("click", function () {
+        setSheetOpen(!$("#optionsSheet").hasClass("open"));
+    });
+
+    // Wischen: nach oben = öffnen, nach unten = schliessen
+    let startY = null;
+    $("#sheetHandle").on("touchstart", function (e) {
+        startY = e.originalEvent.touches[0].clientY;
+    });
+    $("#sheetHandle").on("touchend", function (e) {
+        if (startY === null) return;
+        let deltaY = e.originalEvent.changedTouches[0].clientY - startY;
+        if (deltaY < -30) setSheetOpen(true);
+        if (deltaY > 30) setSheetOpen(false);
+        startY = null;
+    });
+
+    // Schalter «Vergangene Meldungen»
+    $("#toggleReports").on("change", function () {
+        showLayer(appState.reports, this.checked);
+    });
+
+    // Schalter «Standort anzeigen»
+    $("#toggleLocation").on("change", function () {
+        showLayer(appState.markers, this.checked);
+    });
+}
+
+function setSheetOpen(open) {
+    $("#optionsSheet").toggleClass("open", open);
+    $("#sheetHandle").attr("aria-expanded", open);
+}
+
+// Blendet eine Ebene auf der Karte ein oder aus
+function showLayer(layer, visible) {
+    if (visible) {
+        map.addLayer(layer);
+    } else {
+        map.removeLayer(layer);
+    }
 }
 
 // Sonderzeichen wie & < > würden das XML kaputt machen, darum ersetzen
