@@ -30,6 +30,11 @@ let wfs = 'https://baug-ikg-gis-01.ethz.ch:8443/geoserver/GTA26_lab07/wfs';
  * Draws the markers on the map.
  */
 function drawMarkers() {
+    // Standort ausgeblendet («Standort anzeigen» aus) → nichts zeichnen
+    if (map && !map.hasLayer(appState.markers)) {
+        return;
+    }
+
     if (map && appState.markers && appState.latLng && appState.radius) {
         appState.markers.clearLayers();
 
@@ -55,7 +60,8 @@ function drawMarkers() {
 
         // Blickrichtung (optional – diesen Block löschen, falls nicht gewünscht)
         if (appState.heading !== null) {
-            let radius = circle.getBounds().getCenter().lat - circle.getBounds().getSouth();
+            // Radius von Metern in Grad umrechnen (1° Breite ≈ 111 320 m)
+            let radius = appState.radius / 111320;
             let startPointLat = appState.latLng.lat - radius * Math.cos(appState.heading);
             let startPointLng = appState.latLng.lng - radius * Math.sin(appState.heading);
             let endPointLat = appState.latLng.lat - radius * 3 * Math.cos(appState.heading);
@@ -208,7 +214,7 @@ function closeModal() {
 // Liest das Formular aus und schickt die Meldung an die Datenbank
 function formSubmit() {
     if (!appState.latLng) {
-        alert("Dein Standort ist noch nicht bekannt. Bitte kurz warten.");
+        showDialog({ title: "Standort fehlt", text: "Dein Standort ist noch nicht bekannt. Bitte kurz warten." });
         return;
     }
 
@@ -219,7 +225,7 @@ function formSubmit() {
     let remark = $("#remark").val().trim();
 
     if (categories.length === 0) {
-        alert("Bitte mindestens eine Kategorie auswählen.");
+        showDialog({ title: "Kategorie fehlt", text: "Bitte mindestens eine Kategorie auswählen." });
         return;
     }
 
@@ -345,10 +351,6 @@ function startTrackingUi() {
 }
 
 function stopTracking() {
-    if (!confirm("Weg wirklich beenden?")) {
-        return;
-    }
-
     appState.tracking = false;
     clearInterval(appState.timerInterval);
     releaseWakeLock();
@@ -361,7 +363,7 @@ function stopTracking() {
     console.log("Weg beendet:", { points: points, gaps: appState.trackGaps });
 
     if (points.length < 2) {
-        alert("Es wurden zu wenige Punkte aufgezeichnet, um einen Weg zu speichern.");
+        showDialog({ title: "Kein Weg", text: "Es wurden zu wenige Punkte aufgezeichnet, um einen Weg zu speichern." });
         return;
     }
 
@@ -376,8 +378,7 @@ function stopTracking() {
         }
     }
 
-    let summary = "Weg beendet\n"
-        + "Dauer: " + duration + "\n"
+    let summary = "Dauer: " + duration + "\n"
         + "Distanz: " + Math.round(distance) + " m\n"
         + "Punkte: " + points.length;
 
@@ -386,7 +387,7 @@ function stopTracking() {
         summary += "\nUnterbrüche: " + appState.trackGaps.length
             + " (insgesamt " + formatDuration(gapMs) + ")";
     }
-    alert(summary);
+    showDialog({ title: "Weg beendet", text: summary });
 
     // TODO: Trajektorie in die Datenbank schreiben, sobald eure Tabelle steht.
     //       Jedes Teilstück (seg) ist eine eigene Linie → z. B. MultiLineString,
@@ -525,7 +526,7 @@ function clearSavedTrack() {
     }
 }
 
-function restoreTrack() {
+async function restoreTrack() {
     let saved;
     try {
         saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
@@ -535,8 +536,12 @@ function restoreTrack() {
     if (!saved || !saved.trackStart) return;
 
     let startTime = new Date(saved.trackStart).toLocaleTimeString("de-CH", { hour: "2-digit", minute: "2-digit" });
-    let resume = confirm("Es gibt eine unterbrochene Aufzeichnung (gestartet um " + startTime + ").\n\n"
-        + "OK = fortsetzen\nAbbrechen = verwerfen");
+    let resume = await showDialog({
+        title: "Weg fortsetzen?",
+        text: "Es gibt eine unterbrochene Aufzeichnung (gestartet um " + startTime + ").",
+        ok: "Fortsetzen",
+        cancel: "Verwerfen"
+    });
 
     if (!resume) {
         clearSavedTrack();
@@ -558,6 +563,38 @@ function restoreTrack() {
 
     drawTrack();
     startTrackingUi();
+}
+
+// ------- Eigenes Dialogfenster (statt alert/confirm des Browsers) -------
+// Gibt ein Promise zurück: true = OK gedrückt, false = Abbrechen.
+// Beispiel:  let ja = await showDialog({ title: "...", text: "...", ok: "Ja", cancel: "Nein" });
+// Ohne «cancel» erscheint nur der OK-Knopf (wie alert).
+
+function showDialog(options) {
+    return new Promise(function (resolve) {
+        $("#dialogTitle").text(options.title || "");
+        $("#dialogText").text(options.text || "");
+        $("#dialogOk").text(options.ok || "OK");
+
+        let cancelBtn = $("#dialogCancel");
+        if (options.cancel) {
+            cancelBtn.text(options.cancel).show();
+        } else {
+            cancelBtn.hide();
+        }
+
+        $("#dialog").removeClass("hidden");
+        $("#dialogOk").trigger("focus");
+
+        function close(result) {
+            $("#dialog").addClass("hidden");
+            $("#dialogOk, #dialogCancel").off("click");
+            resolve(result);
+        }
+
+        $("#dialogOk").on("click", function () { close(true); });
+        $("#dialogCancel").on("click", function () { close(false); });
+    });
 }
 
 // ------- Kurze Hinweise unten auf der Karte -------
@@ -622,6 +659,9 @@ function initOptionsSheet() {
     // Schalter «Standort anzeigen»
     $("#toggleLocation").on("change", function () {
         showLayer(appState.markers, this.checked);
+        if (this.checked) {
+            drawMarkers(); // beim Einblenden gleich die aktuelle Position zeichnen
+        }
     });
 }
 
@@ -690,7 +730,7 @@ function insertPoint(lat, lng, name) {
                 let msg = exception.text();
                 console.error("WFS Transaction failed:");
                 console.error(msg);
-                alert("WFS Error:\n" + msg);
+                showDialog({ title: "Fehler", text: "Die Meldung konnte nicht gespeichert werden.\n\n" + msg });
                 return;
             }
 
@@ -699,10 +739,10 @@ function insertPoint(lat, lng, name) {
 
             if (successNode.length > 0) {
                 console.log("WFS Transaction successful");
-                alert("Data successfully inserted into database.");
+                showToast("Meldung gespeichert – danke!");
             } else {
                 console.log("Transaction response received, but success could not be verified.");
-                alert("Response received from Geoserver. Please check the response details.");
+                showToast("Meldung gesendet (Bestätigung unklar).");
             }
 
             console.log(new XMLSerializer().serializeToString(response));
@@ -711,7 +751,7 @@ function insertPoint(lat, lng, name) {
             console.error("AJAX Error");
             console.error("HTTP Status:", xhr.status);
             console.error(errorThrown);
-            alert("Connection to Geoserver failed.\n" + "HTTP Status: " + xhr.status);
+            showDialog({ title: "Keine Verbindung", text: "Der Server ist nicht erreichbar. Die Meldung wurde nicht gespeichert.\n\n(HTTP-Status: " + xhr.status + ")" });
         }
     });
 }
@@ -723,7 +763,7 @@ function goToMyLocation() {
     if (appState.latLng) {
         map.flyTo(appState.latLng, 17);
     } else {
-        alert("Dein Standort ist noch nicht bekannt.");
+        showToast("Dein Standort ist noch nicht bekannt.");
     }
 }
 

@@ -596,3 +596,60 @@ body::after {
     opacity: 1;
     transform: translate(-50%, 0);
 }
+
+
+/* ---------- Eigenes Dialogfenster ---------- */
+.dialog-modal {
+    z-index: 2100; /* auch über dem Fenster «Meldung erfassen» */
+}
+
+.dialog-box {
+    max-width: 320px;
+    padding: 20px 20px 22px;
+}
+
+.dialog-text {
+    font-size: 17px;
+    line-height: 1.45;
+    color: #222;
+    margin: 16px 0 22px;
+    white-space: pre-line; /* Zeilenumbrüche (\n) im Text anzeigen */
+}
+
+.dialog-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+}
+
+.dialog-buttons .btn-send {
+    margin: 0;
+}
+
+/* Beide Knöpfe gleich breit nebeneinander */
+.dialog-buttons > button {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 12px 6px;
+    font-size: 15px;
+    letter-spacing: 1px;
+}
+
+/* Zweiter Knopf: weiss mit blauem Rand */
+.btn-outline {
+    background: #ffffff;
+    color: var(--navy);
+    border: 2px solid var(--navy);
+    border-radius: 999px;
+    padding: 10px 26px;
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 17px;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    cursor: pointer;
+}
+
+.btn-outline:hover {
+    background: #eef2f9;
+}
