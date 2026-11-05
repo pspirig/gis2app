@@ -21,7 +21,9 @@ let appState = {
 
     heading: null,
     name: null,
-    hasCentered: false
+    hasCentered: false,
+
+    user: null        // Angaben vom Start-Bildschirm {user_id, gender, age_group, familiarity, ...}
 };
 
 let wfs = 'https://baug-ikg-gis-01.ethz.ch:8443/geoserver/GTA26_lab07/wfs';
@@ -198,6 +200,9 @@ function onload() {
 
     // ------- Leiste «Weg starten / beenden» -------
     initTrackBar();
+
+    // ------- Start-Bildschirm (Angaben + Datenschutz) -------
+    initOnboarding();
 }
 
 function openModal() {
@@ -630,9 +635,122 @@ function releaseWakeLock() {
     }
 }
 
+// ------- Start-Bildschirm: Angaben zur Person + Datenschutz -------
+// Erscheint beim ersten Öffnen. Die Angaben werden im Browser gespeichert,
+// damit man sie nicht jedes Mal neu eingeben muss.
+
+const PROFILE_KEY = "safesteps_user";
+
+function initOnboarding() {
+    $("#onboardingForm").on("submit", function (event) {
+        event.preventDefault();
+        submitOnboarding();
+    });
+
+    $("#closeOnboardingBtn").on("click", closeOnboarding);
+
+    $("#editProfileBtn").on("click", function () {
+        setSheetOpen(false);
+        openOnboarding(true);
+    });
+
+    appState.user = loadProfile();
+    if (!appState.user) {
+        openOnboarding(false); // erster Start
+    }
+}
+
+// editMode = true: Angaben ändern (mit X zum Schliessen)
+// editMode = false: erster Start (muss ausgefüllt werden)
+function openOnboarding(editMode) {
+    let form = $("#onboardingForm");
+    form.trigger("reset");
+    form.data("editMode", editMode);
+
+    // Bisherige Angaben eintragen
+    let user = appState.user;
+    if (user) {
+        $("#gender").val(user.gender);
+        $("#ageGroup").val(user.age_group);
+        $("input[name='familiarity'][value='" + user.familiarity + "']").prop("checked", true);
+        $("#consent").prop("checked", user.consent === true);
+    }
+
+    $("#onboardingTitle").text(editMode ? "Meine Angaben" : "Willkommen bei Safe Steps");
+    $("#onboardingSubmit").text(editMode ? "Speichern" : "Starten");
+    $("#closeOnboardingBtn").toggle(editMode);
+    $("#onboarding").removeClass("hidden");
+}
+
+function closeOnboarding() {
+    $("#onboarding").addClass("hidden");
+}
+
+function submitOnboarding() {
+    let gender = $("#gender").val();
+    let ageGroup = $("#ageGroup").val();
+    let familiarity = $("input[name='familiarity']:checked").val();
+    let consent = $("#consent").prop("checked");
+
+    if (!gender || !ageGroup || familiarity === undefined) {
+        showDialog({ title: "Angaben fehlen", text: "Bitte beantworte alle Fragen. Du kannst auch «keine Angabe» wählen." });
+        return;
+    }
+    if (!consent) {
+        showDialog({ title: "Einwilligung fehlt", text: "Ohne dein Einverständnis können wir keine Daten speichern." });
+        return;
+    }
+
+    let editMode = $("#onboardingForm").data("editMode");
+    let oldUser = appState.user;
+
+    appState.user = {
+        user_id: oldUser ? oldUser.user_id : null, // kommt später von der Datenbank
+        gender: gender,
+        age_group: ageGroup,
+        familiarity: familiarity === "true",
+        consent: true,
+        created_at: oldUser ? oldUser.created_at : new Date().toISOString()
+    };
+    saveProfile(appState.user);
+    console.log("Angaben gespeichert:", appState.user);
+
+    // TODO Datenbank:
+    //   - erster Start: User per WFS-T Insert anlegen, die zurückgegebene ID
+    //     in appState.user.user_id speichern und saveProfile() aufrufen
+    //   - Bearbeiten: User per WFS-T Update ändern
+
+    closeOnboarding();
+    showToast(editMode ? "Angaben gespeichert." : "Danke! Du kannst jetzt loslegen.");
+}
+
+function loadProfile() {
+    try {
+        return JSON.parse(localStorage.getItem(PROFILE_KEY));
+    } catch (err) {
+        return null;
+    }
+}
+
+function saveProfile(user) {
+    try {
+        localStorage.setItem(PROFILE_KEY, JSON.stringify(user));
+    } catch (err) {
+        console.warn("Angaben konnten nicht gespeichert werden:", err);
+    }
+}
+
 // ------- Panel «Anzeigeoptionen» -------
 
 function initOptionsSheet() {
+    // Startzustand: beide Schalter an, beide Ebenen sichtbar.
+    // (Manche Browser, z. B. Firefox, merken sich sonst den alten Schalterstand
+    //  beim Neuladen – dann passen Schalter und Karte nicht zusammen.)
+    $("#toggleReports").prop("checked", true);
+    $("#toggleLocation").prop("checked", true);
+    showLayer(appState.reports, true);
+    showLayer(appState.markers, true);
+
     // Auf-/Zuklappen durch Tippen auf den Kopf
     $("#sheetHandle").on("click", function () {
         setSheetOpen(!$("#optionsSheet").hasClass("open"));

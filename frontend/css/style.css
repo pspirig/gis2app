@@ -273,7 +273,9 @@ body::after {
     font-size: 15px;
 }
 
-.check-row input[type="checkbox"] {
+.check-row input[type="checkbox"],
+.check-row input[type="radio"],
+.consent-row input[type="checkbox"] {
     appearance: none;
     -webkit-appearance: none;
     width: 22px;
@@ -286,12 +288,16 @@ body::after {
     position: relative;
 }
 
-.check-row input[type="checkbox"]:checked {
+.check-row input[type="checkbox"]:checked,
+.check-row input[type="radio"]:checked,
+.consent-row input[type="checkbox"]:checked {
     background: #a9c1e8;
 }
 
 /* Häkchen im Kreis */
-.check-row input[type="checkbox"]:checked::after {
+.check-row input[type="checkbox"]:checked::after,
+.check-row input[type="radio"]:checked::after,
+.consent-row input[type="checkbox"]:checked::after {
     content: "";
     position: absolute;
     left: 6px;
@@ -652,4 +658,48 @@ body::after {
 
 .btn-outline:hover {
     background: #eef2f9;
+}
+
+
+/* ---------- Start-Bildschirm (Angaben + Datenschutz) ---------- */
+.onboarding-modal {
+    z-index: 2050; /* über allem, ausser den Dialogfenstern (2100) */
+}
+
+.onboarding-intro {
+    font-size: 16px;
+    line-height: 1.45;
+    color: #222;
+    margin: 14px 0 4px;
+}
+
+.privacy-text {
+    font-size: 14px;
+    line-height: 1.45;
+    color: #555;
+    margin: 0 0 12px;
+}
+
+/* Einwilligung: Kreis links, Text links daneben */
+.consent-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    font-size: 15px;
+    line-height: 1.4;
+    cursor: pointer;
+}
+
+/* Link-Knopf im Panel «Anzeigeoptionen» */
+.link-btn {
+    align-self: flex-start;
+    margin-top: 18px;
+    background: none;
+    border: none;
+    padding: 6px 4px;
+    font-family: inherit;
+    font-size: 17px;
+    color: var(--navy);
+    text-decoration: underline;
+    cursor: pointer;
 }
