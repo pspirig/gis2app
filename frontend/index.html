@@ -35,13 +35,58 @@
     <script src="js/app.js" defer></script>
 </head>
 <body onload="onload()">
-<header>GTA Location Mapper</header>
 
 <div class="content" id="main">
     <div id="map"></div>
+
+    <!-- Timer während der Aufzeichnung (oben in der Mitte) -->
+    <div id="timer" class="timer hidden">00:00:00</div>
+
+    <!-- Fehlermeldungen (z. B. Standort nicht verfügbar) -->
+    <div id="error-messages" class="error-messages"></div>
+
+    <!-- Kurze Hinweise (z. B. «Aufzeichnung war unterbrochen») -->
+    <div id="toast" class="toast" role="status"></div>
+
     <button id="fillInBtn" class="flag-btn" aria-label="Neue Meldung erfassen">
         <i class="fa-solid fa-flag"></i>
     </button>
+</div>
+
+<!-- ---------- Leiste «Weg starten / Weg beenden» ---------- -->
+<div id="trackBar" class="track-bar">
+    <span id="trackLabel" class="track-label">Weg starten:</span>
+    <button type="button" id="trackBtn" class="track-btn">Los</button>
+</div>
+
+<!-- ---------- Panel «Anzeigeoptionen» (schiebt sich von unten hoch) ---------- -->
+<div id="optionsSheet" class="sheet">
+    <button type="button" id="sheetHandle" class="sheet-header"
+            aria-expanded="false" aria-controls="sheetBody">
+        <span class="sheet-grip"></span>
+        <span class="sheet-title">Anzeigeoptionen</span>
+    </button>
+
+    <div id="sheetBody" class="sheet-body">
+        <label class="toggle-row">
+            <span>Vergangene Meldungen</span>
+            <input type="checkbox" id="toggleReports" class="toggle" checked autocomplete="off">
+        </label>
+        <label class="toggle-row">
+            <span>Standort anzeigen</span>
+            <input type="checkbox" id="toggleLocation" class="toggle" checked autocomplete="off">
+        </label>
+
+        <button type="button" id="editProfileBtn" class="link-btn">
+            <i class="fa-solid fa-user-pen"></i> Meine Angaben ändern
+        </button>
+
+        <!-- Footer: steht ganz unten im Panel -->
+        <footer class="sheet-footer">
+            <strong>Safe Steps</strong><br>
+            &copy; GTA G1 2026 · IKG @ ETH Zürich
+        </footer>
+    </div>
 </div>
 
 <!-- ---------- Fenster «Meldung erfassen» ---------- -->
@@ -107,11 +152,96 @@
     </div>
 </div>
 
-<footer>
-    <div>
-        &copy; GTA G1 2026<br>
-        IKG @ ETH Zürich
+<!-- ---------- Start-Bildschirm: Angaben zur Person + Datenschutz ---------- -->
+<div id="onboarding" class="modal onboarding-modal hidden" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">
+    <div class="modal-box">
+
+        <div class="modal-top">
+            <i class="fa-solid fa-shoe-prints modal-flag"></i>
+            <!-- X nur beim Bearbeiten sichtbar, nicht beim ersten Start -->
+            <button type="button" id="closeOnboardingBtn" class="close-btn" aria-label="Schliessen">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+
+        <h2 id="onboardingTitle" class="modal-title">Willkommen bei Safe Steps</h2>
+
+        <p class="onboarding-intro">
+            Zeichne deinen Heimweg auf und melde Orte, an denen du dich unsicher fühlst.
+            Ein paar anonyme Angaben helfen uns bei der Auswertung.
+        </p>
+
+        <form id="onboardingForm">
+            <!-- Geschlecht -->
+            <div class="form-section">
+                <label for="gender" class="form-label">Geschlecht:</label>
+                <select id="gender" name="gender" class="form-field">
+                    <option value="" disabled selected>Bitte wählen</option>
+                    <option value="weiblich">weiblich</option>
+                    <option value="männlich">männlich</option>
+                    <option value="divers">divers</option>
+                    <option value="keine Angabe">keine Angabe</option>
+                </select>
+            </div>
+
+            <!-- Altersgruppe -->
+            <div class="form-section">
+                <label for="ageGroup" class="form-label">Altersgruppe:</label>
+                <select id="ageGroup" name="ageGroup" class="form-field">
+                    <option value="" disabled selected>Bitte wählen</option>
+                    <option value="18-24">18–24</option>
+                    <option value="25-34">25–34</option>
+                    <option value="35-49">35–49</option>
+                    <option value="50-64">50–64</option>
+                    <option value="65+">65+</option>
+                    <option value="keine Angabe">keine Angabe</option>
+                </select>
+            </div>
+
+            <!-- Ortskenntnis (familiarity) -->
+            <div class="form-section">
+                <span class="form-label">Kennst du dich in Zürich gut aus?</span>
+                <label class="check-row">
+                    <input type="radio" name="familiarity" value="true">
+                    <span>Ja</span>
+                </label>
+                <label class="check-row">
+                    <input type="radio" name="familiarity" value="false">
+                    <span>Nein</span>
+                </label>
+            </div>
+
+            <!-- Datenschutz -->
+            <div class="form-section last">
+                <span class="form-label">Datenschutz:</span>
+                <p class="privacy-text">
+                    Safe Steps speichert deine Wege und Meldungen ohne Namen oder E-Mail.
+                    Die Daten werden nur für ein Studienprojekt an der ETH Zürich
+                    (Geoinformationstechnologien und -analysen, HS26) verwendet.
+                    Aufgezeichnet wird nur, solange du «Los» gedrückt hast.
+                </p>
+                <label class="consent-row">
+                    <input type="checkbox" id="consent" name="consent">
+                    <span>Ich bin einverstanden, dass meine Daten dafür verwendet werden.</span>
+                </label>
+            </div>
+
+            <button type="submit" id="onboardingSubmit" class="btn-send">Starten</button>
+        </form>
     </div>
-</footer>
+</div>
+
+<!-- ---------- Eigenes Dialogfenster (ersetzt alert/confirm) ---------- -->
+<div id="dialog" class="modal dialog-modal hidden" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
+    <div class="modal-box dialog-box">
+        <h2 id="dialogTitle" class="modal-title"></h2>
+        <p id="dialogText" class="dialog-text"></p>
+        <div class="dialog-buttons">
+            <button type="button" id="dialogCancel" class="btn-outline">Abbrechen</button>
+            <button type="button" id="dialogOk" class="btn-send">OK</button>
+        </div>
+    </div>
+</div>
+
 </body>
 </html>
