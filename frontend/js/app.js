@@ -9,8 +9,12 @@ let appState = {
 
     // Wegaufzeichnung
     tracking: false,
-    trackPoints: [],  // [{lat, lng, time}, ...]
-    trackLine: null,
+    trackPoints: [],  // [{lat, lng, time, seg}, ...] – seg = Nummer des Teilstücks
+    trackGaps: [],    // [{from, to}, ...] – Unterbrüche (Zeit in ms)
+    currentSeg: 0,    // aktuelles Teilstück (wird nach jeder Lücke erhöht)
+    pendingGap: null, // erkannte Lücke, die beim nächsten Punkt verbucht wird
+    lastTick: null,   // letzter «Herzschlag» des Timers → erkennt eingefrorene Seite
+    hiddenAt: null,   // wann die App in den Hintergrund ging
     trackStart: null,
     timerInterval: null,
     wakeLock: null,
@@ -266,8 +270,10 @@ function addReportMarker(report) {
 
 // ------- Weg aufzeichnen (Trajektorie) -------
 
-const MIN_POINT_DISTANCE = 3;  // Meter: kleinere Bewegungen sind meist GPS-Rauschen
-const MAX_ACCURACY = 50;       // Meter: ungenauere Positionen werden nicht aufgezeichnet
+const MIN_POINT_DISTANCE = 3;   // Meter: kleinere Bewegungen sind meist GPS-Rauschen
+const MAX_ACCURACY = 50;        // Meter: ungenauere Positionen werden nicht aufgezeichnet
+const GAP_SECONDS = 30;         // Sekunden: längerer Unterbruch = Lücke im Weg
+const STORAGE_KEY = "safesteps_track";
 
 function initTrackBar() {
     $("#trackBtn").on("click", function () {
@@ -278,41 +284,59 @@ function initTrackBar() {
         }
     });
 
-    // Bildschirmsperre wird beim Wechsel in eine andere App aufgehoben → zurück in der App neu anfordern
+    // App geht in den Hintergrund / kommt zurück
     document.addEventListener("visibilitychange", function () {
-        if (appState.tracking && document.visibilityState === "visible") {
-            requestWakeLock();
+        if (!appState.tracking) return;
+
+        if (document.visibilityState === "hidden") {
+            appState.hiddenAt = Date.now();
+        } else {
+            if (appState.hiddenAt) {
+                noteGap(appState.hiddenAt, Date.now());
+                appState.hiddenAt = null;
+            }
+            requestWakeLock(); // Bildschirmsperre wird im Hintergrund aufgehoben → neu anfordern
         }
     });
 
     // Warnung, falls man die Seite während der Aufzeichnung schliesst oder neu lädt
     window.addEventListener("beforeunload", function (event) {
         if (appState.tracking) {
+            saveTrack();
             event.preventDefault();
             event.returnValue = "";
         }
     });
+
+    // Gibt es eine unterbrochene Aufzeichnung vom letzten Mal?
+    restoreTrack();
 }
 
 function startTracking() {
     appState.tracking = true;
     appState.trackPoints = [];
+    appState.trackGaps = [];
+    appState.currentSeg = 0;
+    appState.pendingGap = null;
+    appState.hiddenAt = null;
     appState.trackStart = Date.now();
-
-    // Alte Linie entfernen, neue leere Linie anlegen
-    appState.track.clearLayers();
-    appState.trackLine = L.polyline([], {
-        color: '#3b7ddd',
-        weight: 5,
-        opacity: 0.9
-    }).addTo(appState.track);
 
     // Aktuellen Standort gleich als Startpunkt nehmen (falls schon bekannt)
     if (appState.latLng) {
         addTrackPoint(appState.latLng, appState.accuracy, Date.now());
     }
+    drawTrack();
+    saveTrack();
 
-    $("#timer").text("00:00:00");
+    startTrackingUi();
+    showToast("App geöffnet lassen – bei gesperrtem Bildschirm wird der Weg nicht aufgezeichnet.", 6000);
+}
+
+// Gemeinsamer Teil von «starten» und «fortsetzen»
+function startTrackingUi() {
+    appState.lastTick = Date.now();
+    updateTimer();
+    clearInterval(appState.timerInterval);
     appState.timerInterval = setInterval(updateTimer, 1000);
 
     setSheetOpen(false);
@@ -331,31 +355,56 @@ function stopTracking() {
 
     let duration = $("#timer").text();
     setTrackUi(false);
+    clearSavedTrack();
 
     let points = appState.trackPoints;
-    console.log("Weg beendet:", points);
+    console.log("Weg beendet:", { points: points, gaps: appState.trackGaps });
 
     if (points.length < 2) {
         alert("Es wurden zu wenige Punkte aufgezeichnet, um einen Weg zu speichern.");
         return;
     }
 
-    // Gesamtdistanz in Metern
+    // Distanz nur innerhalb der Teilstücke (Lücken zählen nicht)
     let distance = 0;
     for (let i = 1; i < points.length; i++) {
-        distance += map.distance(
-            [points[i - 1].lat, points[i - 1].lng],
-            [points[i].lat, points[i].lng]
-        );
+        if (points[i].seg === points[i - 1].seg) {
+            distance += map.distance(
+                [points[i - 1].lat, points[i - 1].lng],
+                [points[i].lat, points[i].lng]
+            );
+        }
     }
 
-    alert("Weg beendet\n"
+    let summary = "Weg beendet\n"
         + "Dauer: " + duration + "\n"
         + "Distanz: " + Math.round(distance) + " m\n"
-        + "Punkte: " + points.length);
+        + "Punkte: " + points.length;
 
-    // TODO: Trajektorie in die Datenbank schreiben (WFS Insert als LineString
-    //       oder einzelne Punkte mit Zeitstempel), sobald eure Tabelle steht.
+    if (appState.trackGaps.length > 0) {
+        let gapMs = appState.trackGaps.reduce((sum, g) => sum + (g.to - g.from), 0);
+        summary += "\nUnterbrüche: " + appState.trackGaps.length
+            + " (insgesamt " + formatDuration(gapMs) + ")";
+    }
+    alert(summary);
+
+    // TODO: Trajektorie in die Datenbank schreiben, sobald eure Tabelle steht.
+    //       Jedes Teilstück (seg) ist eine eigene Linie → z. B. MultiLineString,
+    //       oder einzelne Punkte mit Zeitstempel und Teilstück-Nummer.
+}
+
+// Merkt sich eine Lücke; sie wird beim nächsten Punkt verbucht
+function noteGap(from, to) {
+    if (to - from < GAP_SECONDS * 1000) return;
+
+    if (appState.pendingGap) {
+        // Mehrere Unterbrüche hintereinander → zu einer Lücke zusammenfassen
+        appState.pendingGap.from = Math.min(appState.pendingGap.from, from);
+        appState.pendingGap.to = Math.max(appState.pendingGap.to, to);
+    } else {
+        appState.pendingGap = { from: from, to: to };
+        showToast("Aufzeichnung war " + formatDuration(to - from) + " unterbrochen.", 5000);
+    }
 }
 
 // Fügt einen Punkt zum Weg hinzu – ausser er ist zu ungenau oder zu nah am letzten
@@ -365,24 +414,82 @@ function addTrackPoint(latLng, accuracy, time) {
     }
 
     let points = appState.trackPoints;
-    if (points.length > 0) {
+
+    // Gab es seit dem letzten Punkt eine Lücke? → neues Teilstück beginnen
+    if (appState.pendingGap) {
+        if (points.length > 0) {
+            appState.currentSeg++;
+            appState.trackGaps.push(appState.pendingGap);
+        }
+        appState.pendingGap = null;
+    } else if (points.length > 0) {
         let last = points[points.length - 1];
         if (map.distance([last.lat, last.lng], latLng) < MIN_POINT_DISTANCE) {
             return;
         }
     }
 
-    points.push({ lat: latLng.lat, lng: latLng.lng, time: time });
-    appState.trackLine.addLatLng(latLng);
+    points.push({ lat: latLng.lat, lng: latLng.lng, time: time, seg: appState.currentSeg });
+    drawTrack();
+    saveTrack();
 }
 
-// Zeigt die vergangene Zeit als hh:mm:ss an
+// Zeichnet den Weg neu: jedes Teilstück blau, Lücken grau gestrichelt
+function drawTrack() {
+    appState.track.clearLayers();
+    let points = appState.trackPoints;
+    if (points.length === 0) return;
+
+    // Punkte nach Teilstück gruppieren
+    let segments = [];
+    points.forEach(function (p) {
+        if (!segments[p.seg]) segments[p.seg] = [];
+        segments[p.seg].push([p.lat, p.lng]);
+    });
+    segments = segments.filter(Boolean);
+
+    segments.forEach(function (seg, i) {
+        // Lücke zum vorherigen Teilstück
+        if (i > 0) {
+            let prev = segments[i - 1];
+            L.polyline([prev[prev.length - 1], seg[0]], {
+                color: '#8a93a8',
+                weight: 3,
+                dashArray: '4 8'
+            }).addTo(appState.track);
+        }
+        L.polyline(seg, {
+            color: '#3b7ddd',
+            weight: 5,
+            opacity: 0.9
+        }).addTo(appState.track);
+    });
+}
+
+// Zeigt die vergangene Zeit als hh:mm:ss an – und erkennt eingefrorene Seiten
 function updateTimer() {
-    let seconds = Math.floor((Date.now() - appState.trackStart) / 1000);
+    let now = Date.now();
+
+    // Läuft der Timer nach einer Pause erst jetzt wieder, war die Seite eingefroren
+    if (appState.lastTick) {
+        noteGap(appState.lastTick, now);
+    }
+    appState.lastTick = now;
+
+    let seconds = Math.floor((now - appState.trackStart) / 1000);
     let h = Math.floor(seconds / 3600);
     let m = Math.floor((seconds % 3600) / 60);
     let s = seconds % 60;
     $("#timer").text([h, m, s].map(n => String(n).padStart(2, "0")).join(":"));
+}
+
+// Macht aus Millisekunden z. B. «45 s» oder «3 Min.»
+function formatDuration(ms) {
+    let seconds = Math.round(ms / 1000);
+    if (seconds < 60) return seconds + " s";
+    let minutes = Math.round(seconds / 60);
+    if (minutes < 60) return minutes + " Min.";
+    return Math.floor(minutes / 60) + " h " + (minutes % 60) + " Min.";
 }
 
 // Schaltet die Leiste zwischen «LOS» (weiss) und «STOP» (rot) um
@@ -393,8 +500,81 @@ function setTrackUi(active) {
     $("#timer").toggleClass("hidden", !active);
 }
 
-// Verhindert, dass der Bildschirm während der Aufzeichnung ausgeht
+// ------- Zwischenspeichern im Browser (localStorage) -------
+// Falls der Browser die Seite im Hintergrund schliesst, geht der Weg nicht verloren.
+
+function saveTrack() {
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+            trackStart: appState.trackStart,
+            points: appState.trackPoints,
+            gaps: appState.trackGaps,
+            currentSeg: appState.currentSeg,
+            savedAt: Date.now()
+        }));
+    } catch (err) {
+        console.warn("Weg konnte nicht zwischengespeichert werden:", err);
+    }
+}
+
+function clearSavedTrack() {
+    try {
+        localStorage.removeItem(STORAGE_KEY);
+    } catch (err) {
+        // egal
+    }
+}
+
+function restoreTrack() {
+    let saved;
+    try {
+        saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    } catch (err) {
+        return;
+    }
+    if (!saved || !saved.trackStart) return;
+
+    let startTime = new Date(saved.trackStart).toLocaleTimeString("de-CH", { hour: "2-digit", minute: "2-digit" });
+    let resume = confirm("Es gibt eine unterbrochene Aufzeichnung (gestartet um " + startTime + ").\n\n"
+        + "OK = fortsetzen\nAbbrechen = verwerfen");
+
+    if (!resume) {
+        clearSavedTrack();
+        return;
+    }
+
+    appState.tracking = true;
+    appState.trackStart = saved.trackStart;
+    appState.trackPoints = saved.points || [];
+    appState.trackGaps = saved.gaps || [];
+    appState.currentSeg = saved.currentSeg || 0;
+    appState.pendingGap = null;
+
+    // Die Zeit, in der die Seite zu war, ist eine Lücke
+    let lastTime = appState.trackPoints.length > 0
+        ? appState.trackPoints[appState.trackPoints.length - 1].time
+        : saved.savedAt;
+    noteGap(lastTime, Date.now());
+
+    drawTrack();
+    startTrackingUi();
+}
+
+// ------- Kurze Hinweise unten auf der Karte -------
+
+let toastTimeout = null;
+
+function showToast(text, ms) {
+    $("#toast").text(text).addClass("visible");
+    clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(function () {
+        $("#toast").removeClass("visible");
+    }, ms || 4000);
+}
+
+// ------- Bildschirm wach halten -------
 // (bei gesperrtem Bildschirm liefert der Browser keine Positionen mehr)
+
 async function requestWakeLock() {
     if (!("wakeLock" in navigator)) {
         return;

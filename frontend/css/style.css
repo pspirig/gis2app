@@ -568,3 +568,31 @@ body::after {
 .track-btn:active {
     transform: scale(0.96);
 }
+
+
+/* ---------- Kurze Hinweise (Toast) über der Leiste ---------- */
+.toast {
+    position: absolute;
+    left: 50%;
+    bottom: calc(var(--bottom-ui) + 96px); /* über dem Fahnen-Knopf */
+    transform: translate(-50%, 10px);
+    width: max-content;
+    max-width: calc(100% - 48px);
+    z-index: 1000;
+    background: var(--navy);
+    color: #ffffff;
+    font-size: 15px;
+    line-height: 1.35;
+    text-align: center;
+    padding: 10px 16px;
+    border-radius: 12px;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.toast.visible {
+    opacity: 1;
+    transform: translate(-50%, 0);
+}
