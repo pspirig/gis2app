@@ -4,6 +4,9 @@
     --red: #b02a12;
     --blue: #3b7ddd;
     --sheet-peek: 72px; /* so viel vom Panel ist im eingeklappten Zustand sichtbar */
+    --bar-height: 88px; /* sichtbare Höhe der Leiste «Weg starten» */
+    --frame: 10px;      /* dunkelblauer Rahmen rund um die App (wie im Entwurf) */
+    --bottom-ui: calc(var(--frame) + var(--sheet-peek) + var(--bar-height)); /* alles, was unten die Karte verdeckt */
 }
 
 /* ---------- Grundlayout ---------- */
@@ -18,6 +21,7 @@ html {
 }
 
 body {
+    background: var(--navy); /* sichtbar als Rahmen um die Karte */
     display: flex;
     flex-direction: column;
     position: fixed;
@@ -37,19 +41,26 @@ header {
     z-index: 9;
 }
 
-footer {
-    color: #becee2;
-    background: var(--navy);
-    box-shadow: 0px 0px 8px 0px rgba(0, 0, 0, 0.4);
-    padding: 24px;
-    z-index: 9;
-}
 
 .content {
     flex-grow: 1;
     align-items: stretch;
     display: flex;
     position: relative; /* Bezugsrahmen für den Fahnen-Knopf */
+    margin: var(--frame) var(--frame) 0; /* Rahmen oben, links, rechts */
+}
+
+/* Rahmen unten: liegt über Leiste und Panel, aber unter dem Meldungs-Fenster */
+body::after {
+    content: "";
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: var(--frame);
+    background: var(--navy);
+    z-index: 1600;
+    pointer-events: none;
 }
 
 /* ---------- Karte ---------- */
@@ -107,7 +118,7 @@ footer {
 /* Roter runder Knopf mit Fahne (unten links) */
 .flag-btn {
     position: absolute;
-    bottom: calc(var(--sheet-peek) + 20px); /* über dem eingeklappten Panel */
+    bottom: calc(var(--bottom-ui) + 16px); /* über Leiste und eingeklapptem Panel */
     left: 20px;
     z-index: 1000;
     width: 64px;
@@ -317,7 +328,7 @@ footer {
 .error-messages {
     display: none; /* wird per JS mit .show() eingeblendet */
     position: absolute;
-    top: 12px;
+    top: 60px; /* unter dem Timer */
     left: 12px;
     right: 72px;
     z-index: 1000;
@@ -331,7 +342,7 @@ footer {
 
 /* Leaflet-Quellenangabe (swisstopo) über das eingeklappte Panel schieben */
 .leaflet-bottom {
-    bottom: var(--sheet-peek);
+    bottom: var(--bottom-ui);
 }
 
 
@@ -348,9 +359,9 @@ footer {
 /* ---------- Panel «Anzeigeoptionen» ---------- */
 .sheet {
     position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    left: var(--frame);
+    right: var(--frame);
+    bottom: var(--frame);
     height: 75vh;
     z-index: 1500; /* über der Karte, unter dem Meldungs-Fenster (2000) */
     background: #ffffff;
@@ -406,6 +417,22 @@ footer {
     flex: 1;
     overflow-y: auto;
     padding: 4px 20px 20px;
+    display: flex;
+    flex-direction: column; /* damit der Footer nach unten rutschen kann */
+}
+
+/* Footer im Panel: ganz unten, klein und dezent */
+.sheet-footer {
+    margin-top: auto; /* schiebt ihn ans Ende des Panels */
+    padding-top: 24px;
+    text-align: center;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #8a93a8;
+}
+
+.sheet-footer strong {
+    color: var(--navy);
 }
 
 /* Zeile: Text links, Schalter rechts, blaue Linie darunter */
@@ -455,4 +482,89 @@ footer {
 
 .toggle:checked::after {
     transform: translateX(32px);
+}
+
+
+/* ---------- Timer oben in der Mitte ---------- */
+.timer {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    background: var(--red);
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 20px;
+    letter-spacing: 1px;
+    font-variant-numeric: tabular-nums; /* Ziffern gleich breit → Timer «zappelt» nicht */
+    padding: 6px 16px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.timer.hidden {
+    display: none;
+}
+
+
+/* ---------- Leiste «Weg starten / Weg beenden» ---------- */
+/* Liegt direkt über dem Panel; das Panel überlappt sie unten ein Stück,
+   damit hinter den runden Ecken die Leistenfarbe sichtbar ist (wie im Entwurf). */
+.track-bar {
+    position: fixed;
+    left: var(--frame);
+    right: var(--frame);
+    bottom: calc(var(--frame) + var(--sheet-peek) - 32px);
+    height: calc(var(--bar-height) + 32px);
+    padding-bottom: 32px;
+    box-sizing: border-box;
+    z-index: 1400; /* unter dem Panel (1500) */
+    background: #ffffff;
+    box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.15);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: background 0.3s ease;
+}
+
+.track-bar.active {
+    background: var(--red);
+}
+
+.track-label {
+    font-size: 17px;
+    font-weight: 600;
+    color: #222;
+}
+
+.track-bar.active .track-label {
+    color: #ffffff;
+}
+
+/* Runder Knopf: rot mit weisser Schrift (LOS) */
+.track-btn {
+    background: var(--red);
+    color: #ffffff;
+    border: none;
+    border-radius: 999px;
+    padding: 10px 40px 10px 46px; /* rechts weniger wegen letter-spacing */
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 17px;
+    text-transform: uppercase;
+    letter-spacing: 6px;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* …und umgekehrt beim Aufzeichnen: weiss mit roter Schrift (STOP) */
+.track-bar.active .track-btn {
+    background: #ffffff;
+    color: var(--red);
+}
+
+.track-btn:active {
+    transform: scale(0.96);
 }

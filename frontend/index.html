@@ -39,12 +39,21 @@
 <div class="content" id="main">
     <div id="map"></div>
 
+    <!-- Timer während der Aufzeichnung (oben in der Mitte) -->
+    <div id="timer" class="timer hidden">00:00:00</div>
+
     <!-- Fehlermeldungen (z. B. Standort nicht verfügbar) -->
     <div id="error-messages" class="error-messages"></div>
 
     <button id="fillInBtn" class="flag-btn" aria-label="Neue Meldung erfassen">
         <i class="fa-solid fa-flag"></i>
     </button>
+</div>
+
+<!-- ---------- Leiste «Weg starten / Weg beenden» ---------- -->
+<div id="trackBar" class="track-bar">
+    <span id="trackLabel" class="track-label">Weg starten:</span>
+    <button type="button" id="trackBtn" class="track-btn">Los</button>
 </div>
 
 <!-- ---------- Panel «Anzeigeoptionen» (schiebt sich von unten hoch) ---------- -->
@@ -64,6 +73,12 @@
             <span>Standort anzeigen</span>
             <input type="checkbox" id="toggleLocation" class="toggle" checked>
         </label>
+
+        <!-- Footer: steht ganz unten im Panel -->
+        <footer class="sheet-footer">
+            <strong>Safe Steps</strong><br>
+            &copy; GTA G1 2026 · IKG @ ETH Zürich
+        </footer>
     </div>
 </div>
 

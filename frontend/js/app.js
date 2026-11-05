@@ -2,8 +2,19 @@ let map;
 let appState = {
     markers: null,    // Ebene mit eigenem Standort (Punkt, Kreis, Blickrichtung)
     reports: null,    // Ebene mit Meldungen (rote Fahnen)
+    track: null,      // Ebene mit dem aufgezeichneten Weg (blaue Linie)
     latLng: null,
     radius: null,
+    accuracy: null,
+
+    // Wegaufzeichnung
+    tracking: false,
+    trackPoints: [],  // [{lat, lng, time}, ...]
+    trackLine: null,
+    trackStart: null,
+    timerInterval: null,
+    wakeLock: null,
+
     heading: null,
     name: null,
     hasCentered: false
@@ -63,8 +74,17 @@ function geoSuccess(position) {
     let lat = position.coords.latitude;
     let lng = position.coords.longitude;
     appState.latLng = L.latLng(lat, lng);
+    appState.accuracy = position.coords.accuracy;
     appState.radius = position.coords.accuracy / 2;
     drawMarkers();
+
+    // Standort funktioniert (wieder) → Fehlermeldung ausblenden
+    $("#error-messages").hide();
+
+    // Während einer Aufzeichnung: Punkt zum Weg hinzufügen
+    if (appState.tracking) {
+        addTrackPoint(appState.latLng, appState.accuracy, position.timestamp);
+    }
 
     // Nur beim allerersten Standort automatisch hinspringen
     if (map && !appState.hasCentered) {
@@ -78,9 +98,13 @@ function geoSuccess(position) {
  * @param error Describing the error in more detail.
  */
 function geoError(error) {
-    let errMsg = $("#error-messages");
-    errMsg.text(errMsg.text() + "Fehler beim Abfragen der Position (" + error.code + "): " + error.message + " ");
-    errMsg.show();
+    // Nur die neueste Meldung zeigen (nicht anhängen, sonst wächst der Balken endlos)
+    let texts = {
+        1: "Standortzugriff verweigert – bitte in den Browser-Einstellungen erlauben.",
+        2: "Standort momentan nicht verfügbar (schwaches GPS-Signal?).",
+        3: "Standortabfrage dauert zu lange."
+    };
+    $("#error-messages").text(texts[error.code] || ("Standortfehler: " + error.message)).show();
 }
 
 let geoOptions = {
@@ -122,10 +146,12 @@ function onload() {
     L.control.zoom({ position: 'topright' }).addTo(map);
     appState.markers = L.layerGroup();
     appState.reports = L.layerGroup();
+    appState.track = L.layerGroup();
     L.tileLayer('https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg', {
         maxZoom: 19,
         attribution: '&copy; <a href="https://www.swisstopo.admin.ch">swisstopo</a>'
     }).addTo(map);
+    map.addLayer(appState.track);   // zuunterst: Linie liegt unter Fahnen und Standortpunkt
     map.addLayer(appState.reports);
     map.addLayer(appState.markers);
 
@@ -159,6 +185,9 @@ function onload() {
 
     // ------- Panel «Anzeigeoptionen» -------
     initOptionsSheet();
+
+    // ------- Leiste «Weg starten / beenden» -------
+    initTrackBar();
 }
 
 function openModal() {
@@ -233,6 +262,155 @@ function addReportMarker(report) {
     L.marker([report.lat, report.lng], { icon: flagIcon })
         .bindPopup(popup)
         .addTo(appState.reports);
+}
+
+// ------- Weg aufzeichnen (Trajektorie) -------
+
+const MIN_POINT_DISTANCE = 3;  // Meter: kleinere Bewegungen sind meist GPS-Rauschen
+const MAX_ACCURACY = 50;       // Meter: ungenauere Positionen werden nicht aufgezeichnet
+
+function initTrackBar() {
+    $("#trackBtn").on("click", function () {
+        if (appState.tracking) {
+            stopTracking();
+        } else {
+            startTracking();
+        }
+    });
+
+    // Bildschirmsperre wird beim Wechsel in eine andere App aufgehoben → zurück in der App neu anfordern
+    document.addEventListener("visibilitychange", function () {
+        if (appState.tracking && document.visibilityState === "visible") {
+            requestWakeLock();
+        }
+    });
+
+    // Warnung, falls man die Seite während der Aufzeichnung schliesst oder neu lädt
+    window.addEventListener("beforeunload", function (event) {
+        if (appState.tracking) {
+            event.preventDefault();
+            event.returnValue = "";
+        }
+    });
+}
+
+function startTracking() {
+    appState.tracking = true;
+    appState.trackPoints = [];
+    appState.trackStart = Date.now();
+
+    // Alte Linie entfernen, neue leere Linie anlegen
+    appState.track.clearLayers();
+    appState.trackLine = L.polyline([], {
+        color: '#3b7ddd',
+        weight: 5,
+        opacity: 0.9
+    }).addTo(appState.track);
+
+    // Aktuellen Standort gleich als Startpunkt nehmen (falls schon bekannt)
+    if (appState.latLng) {
+        addTrackPoint(appState.latLng, appState.accuracy, Date.now());
+    }
+
+    $("#timer").text("00:00:00");
+    appState.timerInterval = setInterval(updateTimer, 1000);
+
+    setSheetOpen(false);
+    setTrackUi(true);
+    requestWakeLock();
+}
+
+function stopTracking() {
+    if (!confirm("Weg wirklich beenden?")) {
+        return;
+    }
+
+    appState.tracking = false;
+    clearInterval(appState.timerInterval);
+    releaseWakeLock();
+
+    let duration = $("#timer").text();
+    setTrackUi(false);
+
+    let points = appState.trackPoints;
+    console.log("Weg beendet:", points);
+
+    if (points.length < 2) {
+        alert("Es wurden zu wenige Punkte aufgezeichnet, um einen Weg zu speichern.");
+        return;
+    }
+
+    // Gesamtdistanz in Metern
+    let distance = 0;
+    for (let i = 1; i < points.length; i++) {
+        distance += map.distance(
+            [points[i - 1].lat, points[i - 1].lng],
+            [points[i].lat, points[i].lng]
+        );
+    }
+
+    alert("Weg beendet\n"
+        + "Dauer: " + duration + "\n"
+        + "Distanz: " + Math.round(distance) + " m\n"
+        + "Punkte: " + points.length);
+
+    // TODO: Trajektorie in die Datenbank schreiben (WFS Insert als LineString
+    //       oder einzelne Punkte mit Zeitstempel), sobald eure Tabelle steht.
+}
+
+// Fügt einen Punkt zum Weg hinzu – ausser er ist zu ungenau oder zu nah am letzten
+function addTrackPoint(latLng, accuracy, time) {
+    if (accuracy > MAX_ACCURACY) {
+        return;
+    }
+
+    let points = appState.trackPoints;
+    if (points.length > 0) {
+        let last = points[points.length - 1];
+        if (map.distance([last.lat, last.lng], latLng) < MIN_POINT_DISTANCE) {
+            return;
+        }
+    }
+
+    points.push({ lat: latLng.lat, lng: latLng.lng, time: time });
+    appState.trackLine.addLatLng(latLng);
+}
+
+// Zeigt die vergangene Zeit als hh:mm:ss an
+function updateTimer() {
+    let seconds = Math.floor((Date.now() - appState.trackStart) / 1000);
+    let h = Math.floor(seconds / 3600);
+    let m = Math.floor((seconds % 3600) / 60);
+    let s = seconds % 60;
+    $("#timer").text([h, m, s].map(n => String(n).padStart(2, "0")).join(":"));
+}
+
+// Schaltet die Leiste zwischen «LOS» (weiss) und «STOP» (rot) um
+function setTrackUi(active) {
+    $("#trackBar").toggleClass("active", active);
+    $("#trackLabel").text(active ? "Weg beenden:" : "Weg starten:");
+    $("#trackBtn").text(active ? "Stop" : "Los");
+    $("#timer").toggleClass("hidden", !active);
+}
+
+// Verhindert, dass der Bildschirm während der Aufzeichnung ausgeht
+// (bei gesperrtem Bildschirm liefert der Browser keine Positionen mehr)
+async function requestWakeLock() {
+    if (!("wakeLock" in navigator)) {
+        return;
+    }
+    try {
+        appState.wakeLock = await navigator.wakeLock.request("screen");
+    } catch (err) {
+        console.warn("Bildschirm-Sperre konnte nicht verhindert werden:", err);
+    }
+}
+
+function releaseWakeLock() {
+    if (appState.wakeLock) {
+        appState.wakeLock.release();
+        appState.wakeLock = null;
+    }
 }
 
 // ------- Panel «Anzeigeoptionen» -------
