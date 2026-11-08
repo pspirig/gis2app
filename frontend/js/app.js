@@ -26,8 +26,6 @@ let appState = {
     user: null        // Angaben vom Start-Bildschirm {user_id, gender, age_group, familiarity, ...}
 };
 
-let wfs = 'https://baug-ikg-gis-01.ethz.ch:8443/geoserver/GTA26_lab07/wfs';
-
 /**
  * Draws the markers on the map.
  */
@@ -235,6 +233,8 @@ function formSubmit() {
     }
 
     let report = {
+        userId: appState.user ? appState.user.user_id : null,
+        time: new Date().toISOString(),
         safety: safety,
         categories: categories,
         remark: remark,
@@ -243,12 +243,16 @@ function formSubmit() {
     };
     console.log("Neue Meldung:", report);
 
-    // VORLÄUFIG: Die Übungstabelle hat nur das Feld «name».
-    // Darum schreiben wir alles zusammen hinein. Später mit eigener Tabelle → eigene Spalten.
-    let name = "Sicherheit " + safety + " | " + categories.join(", ") + (remark ? " | " + remark : "");
-    appState.name = name;
-
-    insertPoint(report.lat, report.lng, name);
+    // In die Datenbank schreiben (wfs.js)
+    dbInsertReport(report)
+        .then(function (result) {
+            showToast(result.pending
+                ? "Meldung lokal gespeichert (Datenbank noch nicht verbunden)."
+                : "Meldung gespeichert – danke!");
+        })
+        .catch(function (err) {
+            showDialog({ title: "Fehler", text: "Die Meldung konnte nicht gespeichert werden.\n\n" + err.message });
+        });
 
     // Meldung sofort als Fahne auf der Karte zeigen
     addReportMarker(report);
@@ -394,9 +398,35 @@ function stopTracking() {
     }
     showDialog({ title: "Weg beendet", text: summary });
 
-    // TODO: Trajektorie in die Datenbank schreiben, sobald eure Tabelle steht.
-    //       Jedes Teilstück (seg) ist eine eigene Linie → z. B. MultiLineString,
-    //       oder einzelne Punkte mit Zeitstempel und Teilstück-Nummer.
+    // In die Datenbank schreiben (wfs.js).
+    // Jedes Teilstück (seg) wird eine eigene Linie → MultiLineString.
+    let track = {
+        userId: appState.user ? appState.user.user_id : null,
+        startTime: new Date(appState.trackStart).toISOString(),
+        endTime: new Date().toISOString(),
+        lengthM: Math.round(distance),
+        segments: groupBySegment(points)
+    };
+
+    dbInsertTrack(track)
+        .then(function (result) {
+            showToast(result.pending
+                ? "Weg lokal gespeichert (Datenbank noch nicht verbunden)."
+                : "Weg gespeichert – danke!");
+        })
+        .catch(function (err) {
+            showDialog({ title: "Fehler", text: "Der Weg konnte nicht gespeichert werden.\n\n" + err.message });
+        });
+}
+
+// Teilt die Punkte nach Teilstück auf: [[{lat, lng}, ...], [{lat, lng}, ...]]
+function groupBySegment(points) {
+    let segments = [];
+    points.forEach(function (p) {
+        if (!segments[p.seg]) segments[p.seg] = [];
+        segments[p.seg].push({ lat: p.lat, lng: p.lng });
+    });
+    return segments.filter(Boolean);
 }
 
 // Merkt sich eine Lücke; sie wird beim nächsten Punkt verbucht
@@ -715,10 +745,20 @@ function submitOnboarding() {
     saveProfile(appState.user);
     console.log("Angaben gespeichert:", appState.user);
 
-    // TODO Datenbank:
-    //   - erster Start: User per WFS-T Insert anlegen, die zurückgegebene ID
-    //     in appState.user.user_id speichern und saveProfile() aufrufen
-    //   - Bearbeiten: User per WFS-T Update ändern
+    // Erster Start: User in der Datenbank anlegen (wfs.js) und die neue ID merken.
+    // TODO: Beim Bearbeiten den User per WFS-T Update ändern.
+    if (!editMode) {
+        dbInsertUser(appState.user)
+            .then(function (result) {
+                if (result.id !== null) {
+                    appState.user.user_id = result.id;
+                    saveProfile(appState.user);
+                }
+            })
+            .catch(function (err) {
+                console.error("User konnte nicht angelegt werden:", err);
+            });
+    }
 
     closeOnboarding();
     showToast(editMode ? "Angaben gespeichert." : "Danke! Du kannst jetzt loslegen.");
@@ -795,83 +835,6 @@ function showLayer(layer, visible) {
     } else {
         map.removeLayer(layer);
     }
-}
-
-// Sonderzeichen wie & < > würden das XML kaputt machen, darum ersetzen
-function escapeXml(text) {
-    return String(text)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&apos;");
-}
-
-// Inserts the point in the database
-// TODO: Workspace "GTA26_lab07" und Layer "gta_u22_lab07" auf euer Projekt anpassen
-function insertPoint(lat, lng, name) {
-    let postData =
-        '<wfs:Transaction\n'
-        + '   service="WFS"\n'
-        + '   version="1.0.0"\n'
-        + '   xmlns:wfs="http://www.opengis.net/wfs"\n'
-        + '   xmlns:gml="http://www.opengis.net/gml"\n'
-        + '   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n'
-        + '   xmlns:GTA26_lab07="https://www.gis.ethz.ch/GTA26_lab07">\n'
-        + '   <wfs:Insert>\n'
-        + '       <GTA26_lab07:gta_u22_lab07>\n'
-        + '           <lon>' + lng + '</lon>\n'
-        + '           <lat>' + lat + '</lat>\n'
-        + '           <name>' + escapeXml(name) + '</name>\n'
-        + '           <geometry>\n'
-        + '               <gml:Point srsName="http://www.opengis.net/gml/srs/epsg.xml#4326">\n'
-        + '                   <gml:coordinates decimal="." cs="," ts=" ">' + lng + ',' + lat + '</gml:coordinates>\n'
-        + '               </gml:Point>\n'
-        + '           </geometry>\n'
-        + '       </GTA26_lab07:gta_u22_lab07>\n'
-        + '   </wfs:Insert>\n'
-        + '</wfs:Transaction>';
-
-    $.ajax({
-        type: "POST",
-        url: wfs,
-        dataType: "xml",
-        contentType: "text/xml",
-        data: postData,
-        success: function (response) {
-            console.log("AJAX request succeeded");
-
-            // Check for WFS exception
-            let exception = $(response).find("ServiceException");
-
-            if (exception.length > 0) {
-                let msg = exception.text();
-                console.error("WFS Transaction failed:");
-                console.error(msg);
-                showDialog({ title: "Fehler", text: "Die Meldung konnte nicht gespeichert werden.\n\n" + msg });
-                return;
-            }
-
-            // Check if transaction succeeded
-            let successNode = response.getElementsByTagName("wfs:SUCCESS");
-
-            if (successNode.length > 0) {
-                console.log("WFS Transaction successful");
-                showToast("Meldung gespeichert – danke!");
-            } else {
-                console.log("Transaction response received, but success could not be verified.");
-                showToast("Meldung gesendet (Bestätigung unklar).");
-            }
-
-            console.log(new XMLSerializer().serializeToString(response));
-        },
-        error: function (xhr, errorThrown) {
-            console.error("AJAX Error");
-            console.error("HTTP Status:", xhr.status);
-            console.error(errorThrown);
-            showDialog({ title: "Keine Verbindung", text: "Der Server ist nicht erreichbar. Die Meldung wurde nicht gespeichert.\n\n(HTTP-Status: " + xhr.status + ")" });
-        }
-    });
 }
 
 // ------- Standort-Knopf -------

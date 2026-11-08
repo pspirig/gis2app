@@ -1,0 +1,7 @@
+{
+    "host": "HOSTNAME",
+    "port": 5432,
+    "database": "gta",
+    "user": "gta_uXX",
+    "password": "PASSWORT"
+}

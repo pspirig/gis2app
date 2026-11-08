@@ -1,0 +1,10 @@
+# Zugangsdaten zur Datenbank – nie auf GitHub hochladen!
+backend/db_login.json
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor / System
+.vscode/
+.DS_Store
