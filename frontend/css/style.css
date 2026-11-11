@@ -703,3 +703,100 @@ body::after {
     text-decoration: underline;
     cursor: pointer;
 }
+/* ---------- Username Anzeige (mit Personen-Icon) ---------- */
+.top-username {
+    position: absolute;
+    top: calc(var(--frame) + 12px);
+    left: calc(var(--frame) + 12px);
+    z-index: 1000;
+    background: rgba(255, 255, 255, 0.85);
+    color: var(--navy);
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 700;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.top-username.hidden {
+    display: none;
+}
+
+/* ---------- NEU: Info-Knopf (Anzeigeoptionen) ---------- */
+.info-btn {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: none;
+    border: none;
+    padding: 6px 4px;
+    margin-top: 12px;
+    font-family: inherit;
+    font-size: 17px;
+    color: var(--navy);
+    cursor: pointer;
+    text-align: left;
+}
+
+.info-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    background: #a9c1e8; /* hellblau */
+    color: #ffffff;
+    border-radius: 50%;
+    font-size: 15px;
+    font-style: normal;
+    font-family: 'Source Sans 3', sans-serif;
+    font-weight: 700;
+}
+
+/* ---------- NEU: Mülleimer-Knopf & Layout in der Track-Bar ---------- */
+.track-bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.trash-btn {
+    background: #ffffff;
+    color: var(--blue);
+    border: 2px solid var(--blue);
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    transition: transform 0.1s ease;
+}
+
+.trash-btn:active {
+    transform: scale(0.95);
+}
+
+.trash-btn.hidden {
+    display: none;
+}
+
+/* ---------- NEU: Leere Flaggen (rot umrandet, weiss gefüllt) ---------- */
+.report-flag-empty {
+    background: none;
+    border: none;
+    color: var(--red); /* Rahmenfarbe für fa-regular */
+    font-size: 22px;
+    filter: drop-shadow(0 1px 2px rgba(255, 255, 255, 0.9));
+}
+/* Optionaler weisser Background für Font-Awesome Regular Flags */
+.report-flag-empty i {
+    background: #fff;
+    -webkit-background-clip: text;
+    border-radius: 4px;
+}

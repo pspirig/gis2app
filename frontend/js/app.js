@@ -1,845 +1,483 @@
 let map;
 let appState = {
-    markers: null,    // Ebene mit eigenem Standort (Punkt, Kreis, Blickrichtung)
-    reports: null,    // Ebene mit Meldungen (rote Fahnen)
-    track: null,      // Ebene mit dem aufgezeichneten Weg (blaue Linie)
+    markers: null,    
+    reports: null,    
+    track: null,      
+    pastTracks: null, // NEU: Ebene für vergangene Wege
     latLng: null,
     radius: null,
     accuracy: null,
 
     // Wegaufzeichnung
     tracking: false,
-    trackPoints: [],  // [{lat, lng, time, seg}, ...] – seg = Nummer des Teilstücks
-    trackGaps: [],    // [{from, to}, ...] – Unterbrüche (Zeit in ms)
-    currentSeg: 0,    // aktuelles Teilstück (wird nach jeder Lücke erhöht)
-    pendingGap: null, // erkannte Lücke, die beim nächsten Punkt verbucht wird
-    lastTick: null,   // letzter «Herzschlag» des Timers → erkennt eingefrorene Seite
-    hiddenAt: null,   // wann die App in den Hintergrund ging
+    trackPoints: [],  
+    trackGaps: [],    
+    currentSeg: 0,    
+    pendingGap: null, 
+    lastTick: null,   
+    hiddenAt: null,   
     trackStart: null,
     timerInterval: null,
     wakeLock: null,
 
-    heading: null,
-    name: null,
-    hasCentered: false,
+    // NEU: Auto-Stop Tracking
+    idleAnchor: null, 
+    autoStopWarned: false,
 
-    user: null        // Angaben vom Start-Bildschirm {user_id, gender, age_group, familiarity, ...}
+    heading: null,
+    hasCentered: false,
+    user: null,
+
+    // NEU: Pending Reports
+    pendingReports: {} 
 };
 
-/**
- * Draws the markers on the map.
- */
 function drawMarkers() {
-    // Standort ausgeblendet («Standort anzeigen» aus) → nichts zeichnen
-    if (map && !map.hasLayer(appState.markers)) {
-        return;
-    }
-
+    if (map && !map.hasLayer(appState.markers)) return;
     if (map && appState.markers && appState.latLng && appState.radius) {
         appState.markers.clearLayers();
-
-        // Genauigkeitskreis: dezent im Hintergrund
-        let circle = L.circle(appState.latLng, {
-            radius: appState.radius,
-            stroke: false,
-            fillColor: '#3b7ddd',
-            fillOpacity: 0.15
-        });
+        let circle = L.circle(appState.latLng, { radius: appState.radius, stroke: false, fillColor: '#3b7ddd', fillOpacity: 0.15 });
         appState.markers.addLayer(circle);
-
-        // Blauer Punkt mit weissem Rand (wie im Entwurf)
-        let dot = L.circleMarker(appState.latLng, {
-            radius: 8,
-            color: '#ffffff',
-            weight: 3,
-            fillColor: '#3b7ddd',
-            fillOpacity: 1,
-            className: 'location-dot'
-        });
+        let dot = L.circleMarker(appState.latLng, { radius: 8, color: '#ffffff', weight: 3, fillColor: '#3b7ddd', fillOpacity: 1, className: 'location-dot' });
         appState.markers.addLayer(dot);
 
-        // Blickrichtung (optional – diesen Block löschen, falls nicht gewünscht)
         if (appState.heading !== null) {
-            // Radius von Metern in Grad umrechnen (1° Breite ≈ 111 320 m)
             let radius = appState.radius / 111320;
             let startPointLat = appState.latLng.lat - radius * Math.cos(appState.heading);
             let startPointLng = appState.latLng.lng - radius * Math.sin(appState.heading);
             let endPointLat = appState.latLng.lat - radius * 3 * Math.cos(appState.heading);
             let endPointLng = appState.latLng.lng - radius * 3 * Math.sin(appState.heading);
-
-            let latLngsHeading = [
-                [startPointLat, startPointLng],
-                [endPointLat, endPointLng]
-            ];
-            appState.markers.addLayer(L.polyline(latLngsHeading, {color: '#3b7ddd'}));
+            appState.markers.addLayer(L.polyline([[startPointLat, startPointLng], [endPointLat, endPointLng]], {color: '#3b7ddd'}));
         }
     }
 }
 
-/**
- * Function to be called whenever a new position is available.
- * @param position The new position.
- */
 function geoSuccess(position) {
-    let lat = position.coords.latitude;
-    let lng = position.coords.longitude;
-    appState.latLng = L.latLng(lat, lng);
+    appState.latLng = L.latLng(position.coords.latitude, position.coords.longitude);
     appState.accuracy = position.coords.accuracy;
     appState.radius = position.coords.accuracy / 2;
     drawMarkers();
-
-    // Standort funktioniert (wieder) → Fehlermeldung ausblenden
     $("#error-messages").hide();
 
-    // Während einer Aufzeichnung: Punkt zum Weg hinzufügen
     if (appState.tracking) {
         addTrackPoint(appState.latLng, appState.accuracy, position.timestamp);
     }
 
-    // Nur beim allerersten Standort automatisch hinspringen
     if (map && !appState.hasCentered) {
         map.setView(appState.latLng, 17);
         appState.hasCentered = true;
     }
 }
 
-/**
- * Function to be called if there is an error raised by the Geolocation API.
- * @param error Describing the error in more detail.
- */
 function geoError(error) {
-    // Nur die neueste Meldung zeigen (nicht anhängen, sonst wächst der Balken endlos)
-    let texts = {
-        1: "Standortzugriff verweigert – bitte in den Browser-Einstellungen erlauben.",
-        2: "Standort momentan nicht verfügbar (schwaches GPS-Signal?).",
-        3: "Standortabfrage dauert zu lange."
-    };
+    let texts = { 1: "Standortzugriff verweigert.", 2: "Standort momentan nicht verfügbar.", 3: "Standortabfrage dauert zu lange." };
     $("#error-messages").text(texts[error.code] || ("Standortfehler: " + error.message)).show();
 }
 
-let geoOptions = {
-    enableHighAccuracy: true,
-    maximumAge: 15000,  // The maximum age of a cached location (15 seconds).
-    timeout: 12000   // A maximum of 12 seconds before timeout.
-};
+let geoOptions = { enableHighAccuracy: true, maximumAge: 15000, timeout: 12000 };
 
-/**
- * The onload function is called when the HTML has finished loading.
- */
 function onload() {
-    let errMsg = $("#error-messages");
+    if ("geolocation" in navigator) navigator.geolocation.watchPosition(geoSuccess, geoError, geoOptions);
+    if (window.DeviceOrientationEvent) window.addEventListener('deviceorientation', e => { appState.heading = e.alpha * (Math.PI / 180); drawMarkers(); });
 
-    if ("geolocation" in navigator) {
-        navigator.geolocation.watchPosition(geoSuccess, geoError, geoOptions);
-    } else {
-        errMsg.text(errMsg.text() + "Geolocation is leider auf diesem Gerät nicht verfügbar. ");
-        errMsg.show();
-    }
-
-    if (window.DeviceOrientationEvent) {
-        window.addEventListener('deviceorientation', function (eventData) {
-            appState.heading = eventData.alpha * (Math.PI / 180);
-            drawMarkers();
-        }, false);
-    } else {
-        errMsg.text(errMsg.text() + "DeviceOrientation ist leider nicht verfügbar. ");
-        errMsg.show();
-    }
-
-    // Adding map layer: graue Landeskarte von swisstopo
     map = L.map('map', { zoomControl: false }).setView([47.376750, 8.540721], 16);
-
-    // Knopf «zu meinem Standort» oben rechts
     map.addControl(new LocateControl());
 
-    // Zoom-Knöpfe oben rechts (erscheinen unter dem Standort-Knopf)
     L.control.zoom({ position: 'topright' }).addTo(map);
     appState.markers = L.layerGroup();
     appState.reports = L.layerGroup();
     appState.track = L.layerGroup();
-    L.tileLayer('https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg', {
-        maxZoom: 19,
-        attribution: '&copy; <a href="https://www.swisstopo.admin.ch">swisstopo</a>'
-    }).addTo(map);
-    map.addLayer(appState.track);   // zuunterst: Linie liegt unter Fahnen und Standortpunkt
+    appState.pastTracks = L.layerGroup(); // NEU
+
+    L.tileLayer('https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg', { maxZoom: 19 }).addTo(map);
+    
+    map.addLayer(appState.pastTracks);
+    map.addLayer(appState.track);
     map.addLayer(appState.reports);
     map.addLayer(appState.markers);
 
-    // Panel schliessen, wenn man auf die Karte tippt
-    map.on("click", function () {
-        setSheetOpen(false);
-    });
-
+    map.on("click", () => setSheetOpen(false));
 
     // ------- Fenster «Meldung erfassen» -------
+    $("#fillInBtn").on("click", initNewReport);
+    $("#closeModalBtn").on("click", closeModal); // Schliessen verwirft die Meldung NICHT (bleibt weiss)
+    $("#fillInForm").on("submit", e => { e.preventDefault(); saveModalReport(); });
 
-    // Öffnen
-    $("#fillInBtn").on("click", openModal);
-
-    // Schliessen über das X
-    $("#closeModalBtn").on("click", closeModal);
-
-    // Schliessen per Klick auf den dunklen Hintergrund
-    $("#poiModal").on("click", function (event) {
-        if (event.target === this) {
-            closeModal();
-        }
-    });
-
-    // Absenden
-    $("#fillInForm").on("submit", function (event) {
-        event.preventDefault();
-        formSubmit();
-    });
-
-
-    // ------- Panel «Anzeigeoptionen» -------
     initOptionsSheet();
-
-    // ------- Leiste «Weg starten / beenden» -------
     initTrackBar();
-
-    // ------- Start-Bildschirm (Angaben + Datenschutz) -------
     initOnboarding();
 }
 
-function openModal() {
+// ------- NEU: Später erfassen (leere Flagge) -------
+const flagIconFull = L.divIcon({ className: 'report-flag', html: '<i class="fa-solid fa-flag"></i>', iconSize: [24,24], iconAnchor: [5,22], popupAnchor: [6,-22] });
+const flagIconEmpty = L.divIcon({ className: 'report-flag-empty', html: '<i class="fa-regular fa-flag"></i>', iconSize: [24,24], iconAnchor: [5,22], popupAnchor: [6,-22] });
+
+function initNewReport() {
+    if (!appState.latLng) return showDialog({ title: "Standort fehlt", text: "Dein Standort ist noch nicht bekannt." });
+    
     setSheetOpen(false);
+    
+    // Leere Meldung sofort anlegen
+    let rId = Date.now().toString();
+    appState.pendingReports[rId] = {
+        id: rId, lat: appState.latLng.lat, lng: appState.latLng.lng, time: new Date().toISOString(),
+        isFilled: false, marker: null
+    };
+
+    // Leeren Marker zeichnen
+    let marker = L.marker([appState.latLng.lat, appState.latLng.lng], { icon: flagIconEmpty }).addTo(appState.reports);
+    appState.pendingReports[rId].marker = marker;
+    
+    // Marker-Klick öffnet Modal wieder
+    marker.on('click', () => openModalForReport(rId));
+
+    openModalForReport(rId);
+}
+
+function openModalForReport(rId) {
+    let rep = appState.pendingReports[rId];
+    if (!rep) return;
+    
     $("#fillInForm").trigger("reset");
+    $("#fillInForm").data("report-id", rId);
     $("#poiModal").removeClass("hidden");
 }
 
 function closeModal() {
     $("#poiModal").addClass("hidden");
-    $("#fillInForm").trigger("reset");
+    showToast("Meldung auf der Karte gemerkt. Du kannst sie später ausfüllen.");
 }
 
-// Liest das Formular aus und schickt die Meldung an die Datenbank
-function formSubmit() {
-    if (!appState.latLng) {
-        showDialog({ title: "Standort fehlt", text: "Dein Standort ist noch nicht bekannt. Bitte kurz warten." });
-        return;
-    }
+function saveModalReport() {
+    let rId = $("#fillInForm").data("report-id");
+    let rep = appState.pendingReports[rId];
+    if (!rep) return;
 
     let safety = $("#safety").val();
-    let categories = $("input[name='category']:checked")
-        .map(function () { return this.value; })
-        .get();
+    let categories = $("input[name='category']:checked").map(function(){ return this.value; }).get();
     let remark = $("#remark").val().trim();
 
-    if (categories.length === 0) {
-        showDialog({ title: "Kategorie fehlt", text: "Bitte mindestens eine Kategorie auswählen." });
-        return;
-    }
+    // Kategorien nicht zwingend bei Speicherung durch Formular
+    rep.safety = safety;
+    rep.categories = categories;
+    rep.remark = remark;
+    rep.isFilled = true;
 
-    let report = {
+    // Marker voll machen und Popup binden
+    rep.marker.setIcon(flagIconFull);
+    rep.marker.off('click'); 
+    
+    let popup = `<b>Sicherheitsgefühl: ${escapeXml(safety)}</b><br>` + escapeXml(categories.join(", ")) + (remark ? `<br><i>${escapeXml(remark)}</i>` : "");
+    rep.marker.bindPopup(popup);
+
+    // In DB schreiben
+    sendReportToDB(rep);
+
+    delete appState.pendingReports[rId];
+    $("#poiModal").addClass("hidden");
+    showToast("Meldung vollständig erfasst!");
+}
+
+function sendReportToDB(report) {
+    let finalReport = {
         userId: appState.user ? appState.user.user_id : null,
-        time: new Date().toISOString(),
-        safety: safety,
-        categories: categories,
-        remark: remark,
-        lat: appState.latLng.lat,
-        lng: appState.latLng.lng
+        time: report.time, safety: report.safety || 'unbekannt', categories: report.categories || [],
+        remark: report.remark || '', lat: report.lat, lng: report.lng
     };
-    console.log("Neue Meldung:", report);
-
-    // In die Datenbank schreiben (wfs.js)
-    dbInsertReport(report)
-        .then(function (result) {
-            showToast(result.pending
-                ? "Meldung lokal gespeichert (Datenbank noch nicht verbunden)."
-                : "Meldung gespeichert – danke!");
-        })
-        .catch(function (err) {
-            showDialog({ title: "Fehler", text: "Die Meldung konnte nicht gespeichert werden.\n\n" + err.message });
-        });
-
-    // Meldung sofort als Fahne auf der Karte zeigen
-    addReportMarker(report);
-
-    closeModal();
+    dbInsertReport(finalReport).catch(e => console.error(e));
 }
 
-// ------- Meldungen als rote Fahnen -------
-
-const flagIcon = L.divIcon({
-    className: 'report-flag',
-    html: '<i class="fa-solid fa-flag"></i>',
-    iconSize: [24, 24],
-    iconAnchor: [5, 22],   // Fuss der Fahnenstange steht auf dem Punkt
-    popupAnchor: [6, -22]
-});
-
-// Setzt eine Fahne für eine Meldung auf die Karte (Ebene «Vergangene Meldungen»)
-// TODO: Später alle Meldungen per WFS GetFeature aus der Datenbank laden
-//       und für jede Meldung diese Funktion aufrufen.
-function addReportMarker(report) {
-    let popup = "<b>Sicherheitsgefühl: " + escapeXml(report.safety) + "</b><br>"
-        + escapeXml(report.categories.join(", "))
-        + (report.remark ? "<br><i>" + escapeXml(report.remark) + "</i>" : "");
-
-    L.marker([report.lat, report.lng], { icon: flagIcon })
-        .bindPopup(popup)
-        .addTo(appState.reports);
-}
-
-// ------- Weg aufzeichnen (Trajektorie) -------
-
-const MIN_POINT_DISTANCE = 3;   // Meter: kleinere Bewegungen sind meist GPS-Rauschen
-const MAX_ACCURACY = 50;        // Meter: ungenauere Positionen werden nicht aufgezeichnet
-const GAP_SECONDS = 30;         // Sekunden: längerer Unterbruch = Lücke im Weg
+// ------- Weg aufzeichnen -------
+const MIN_POINT_DISTANCE = 3;
+const MAX_ACCURACY = 50;
+const GAP_SECONDS = 30;
 const STORAGE_KEY = "safesteps_track";
+const AUTOSTOP_DIST = 30; // Meter Radius
+const AUTOSTOP_TIME = 30 * 60 * 1000; // 30 Minuten
+const AUTOWARN_TIME = 25 * 60 * 1000; // 25 Minuten
 
 function initTrackBar() {
-    $("#trackBtn").on("click", function () {
-        if (appState.tracking) {
-            stopTracking();
-        } else {
-            startTracking();
-        }
-    });
+    $("#trackBtn").on("click", () => appState.tracking ? attemptStopTracking() : startTracking());
+    $("#discardBtn").on("click", discardTracking);
 
-    // App geht in den Hintergrund / kommt zurück
-    document.addEventListener("visibilitychange", function () {
+    document.addEventListener("visibilitychange", () => {
         if (!appState.tracking) return;
-
-        if (document.visibilityState === "hidden") {
-            appState.hiddenAt = Date.now();
-        } else {
-            if (appState.hiddenAt) {
-                noteGap(appState.hiddenAt, Date.now());
-                appState.hiddenAt = null;
-            }
-            requestWakeLock(); // Bildschirmsperre wird im Hintergrund aufgehoben → neu anfordern
+        if (document.visibilityState === "hidden") appState.hiddenAt = Date.now();
+        else {
+            if (appState.hiddenAt) { noteGap(appState.hiddenAt, Date.now()); appState.hiddenAt = null; }
+            requestWakeLock();
         }
     });
-
-    // Warnung, falls man die Seite während der Aufzeichnung schliesst oder neu lädt
-    window.addEventListener("beforeunload", function (event) {
-        if (appState.tracking) {
-            saveTrack();
-            event.preventDefault();
-            event.returnValue = "";
-        }
-    });
-
-    // Gibt es eine unterbrochene Aufzeichnung vom letzten Mal?
+    window.addEventListener("beforeunload", e => { if (appState.tracking) { saveTrack(); e.preventDefault(); e.returnValue = ""; } });
     restoreTrack();
 }
 
 function startTracking() {
-    appState.tracking = true;
-    appState.trackPoints = [];
-    appState.trackGaps = [];
-    appState.currentSeg = 0;
-    appState.pendingGap = null;
-    appState.hiddenAt = null;
-    appState.trackStart = Date.now();
+    appState.tracking = true; appState.trackPoints = []; appState.trackGaps = [];
+    appState.currentSeg = 0; appState.pendingGap = null; appState.hiddenAt = null;
+    appState.trackStart = Date.now(); appState.idleAnchor = null; appState.autoStopWarned = false;
 
-    // Aktuellen Standort gleich als Startpunkt nehmen (falls schon bekannt)
-    if (appState.latLng) {
-        addTrackPoint(appState.latLng, appState.accuracy, Date.now());
-    }
-    drawTrack();
-    saveTrack();
-
-    startTrackingUi();
-    showToast("App geöffnet lassen – bei gesperrtem Bildschirm wird der Weg nicht aufgezeichnet.", 6000);
+    if (appState.latLng) addTrackPoint(appState.latLng, appState.accuracy, Date.now());
+    drawTrack(); saveTrack(); startTrackingUi();
 }
 
-// Gemeinsamer Teil von «starten» und «fortsetzen»
 function startTrackingUi() {
     appState.lastTick = Date.now();
     updateTimer();
     clearInterval(appState.timerInterval);
     appState.timerInterval = setInterval(updateTimer, 1000);
+    setSheetOpen(false); setTrackUi(true); requestWakeLock();
+}
 
-    setSheetOpen(false);
-    setTrackUi(true);
-    requestWakeLock();
+// NEU: Check Pending Reports before stopping
+async function attemptStopTracking() {
+    let pendingCount = Object.keys(appState.pendingReports).length;
+    if (pendingCount > 0) {
+        let ok = await showDialog({ 
+            title: "Meldungen offen", 
+            text: `Du hast noch ${pendingCount} unbearbeitete Meldung(en). Möchtest du den Weg trotzdem abschliessen? (Die leeren Orte werden gespeichert)`,
+            ok: "Abschliessen", cancel: "Weiter aufzeichnen"
+        });
+        if (!ok) return;
+        
+        // Speichere leere Meldungen ab
+        for (let rId in appState.pendingReports) {
+            let r = appState.pendingReports[rId];
+            r.marker.setIcon(flagIconFull);
+            r.marker.off('click');
+            sendReportToDB(r);
+        }
+        appState.pendingReports = {};
+    }
+    stopTracking();
 }
 
 function stopTracking() {
-    appState.tracking = false;
-    clearInterval(appState.timerInterval);
-    releaseWakeLock();
-
-    let duration = $("#timer").text();
-    setTrackUi(false);
-    clearSavedTrack();
+    appState.tracking = false; clearInterval(appState.timerInterval); releaseWakeLock();
+    setTrackUi(false); clearSavedTrack();
 
     let points = appState.trackPoints;
-    console.log("Weg beendet:", { points: points, gaps: appState.trackGaps });
+    if (points.length < 2) return showDialog({ title: "Kein Weg", text: "Es wurden zu wenige Punkte aufgezeichnet." });
 
-    if (points.length < 2) {
-        showDialog({ title: "Kein Weg", text: "Es wurden zu wenige Punkte aufgezeichnet, um einen Weg zu speichern." });
-        return;
-    }
-
-    // Distanz nur innerhalb der Teilstücke (Lücken zählen nicht)
     let distance = 0;
     for (let i = 1; i < points.length; i++) {
-        if (points[i].seg === points[i - 1].seg) {
-            distance += map.distance(
-                [points[i - 1].lat, points[i - 1].lng],
-                [points[i].lat, points[i].lng]
-            );
-        }
+        if (points[i].seg === points[i - 1].seg) distance += map.distance([points[i - 1].lat, points[i - 1].lng], [points[i].lat, points[i].lng]);
     }
 
-    let summary = "Dauer: " + duration + "\n"
-        + "Distanz: " + Math.round(distance) + " m\n"
-        + "Punkte: " + points.length;
-
-    if (appState.trackGaps.length > 0) {
-        let gapMs = appState.trackGaps.reduce((sum, g) => sum + (g.to - g.from), 0);
-        summary += "\nUnterbrüche: " + appState.trackGaps.length
-            + " (insgesamt " + formatDuration(gapMs) + ")";
-    }
-    showDialog({ title: "Weg beendet", text: summary });
-
-    // In die Datenbank schreiben (wfs.js).
-    // Jedes Teilstück (seg) wird eine eigene Linie → MultiLineString.
-    let track = {
+    showDialog({ title: "Weg beendet", text: "Dauer: " + $("#timer").text() + "\nDistanz: " + Math.round(distance) + " m\nPunkte: " + points.length });
+    
+    dbInsertTrack({
         userId: appState.user ? appState.user.user_id : null,
         startTime: new Date(appState.trackStart).toISOString(),
-        endTime: new Date().toISOString(),
-        lengthM: Math.round(distance),
-        segments: groupBySegment(points)
-    };
-
-    dbInsertTrack(track)
-        .then(function (result) {
-            showToast(result.pending
-                ? "Weg lokal gespeichert (Datenbank noch nicht verbunden)."
-                : "Weg gespeichert – danke!");
-        })
-        .catch(function (err) {
-            showDialog({ title: "Fehler", text: "Der Weg konnte nicht gespeichert werden.\n\n" + err.message });
-        });
+        endTime: new Date().toISOString(), lengthM: Math.round(distance), segments: groupBySegment(points)
+    }).catch(e => console.error(e));
 }
 
-// Teilt die Punkte nach Teilstück auf: [[{lat, lng}, ...], [{lat, lng}, ...]]
+// NEU: Weg verwerfen
+async function discardTracking() {
+    let ok = await showDialog({ title: "Aufzeichnung verwerfen?", text: "Dieser Weg wird gelöscht und nicht gespeichert.", ok: "Verwerfen", cancel: "Abbrechen" });
+    if (!ok) return;
+
+    appState.tracking = false; clearInterval(appState.timerInterval); releaseWakeLock();
+    setTrackUi(false); clearSavedTrack(); appState.track.clearLayers();
+    $("#timer").text("00:00:00");
+    showToast("Weg verworfen.");
+}
+
 function groupBySegment(points) {
     let segments = [];
-    points.forEach(function (p) {
-        if (!segments[p.seg]) segments[p.seg] = [];
-        segments[p.seg].push({ lat: p.lat, lng: p.lng });
-    });
+    points.forEach(p => { if (!segments[p.seg]) segments[p.seg] = []; segments[p.seg].push({ lat: p.lat, lng: p.lng }); });
     return segments.filter(Boolean);
 }
 
-// Merkt sich eine Lücke; sie wird beim nächsten Punkt verbucht
 function noteGap(from, to) {
     if (to - from < GAP_SECONDS * 1000) return;
-
-    if (appState.pendingGap) {
-        // Mehrere Unterbrüche hintereinander → zu einer Lücke zusammenfassen
-        appState.pendingGap.from = Math.min(appState.pendingGap.from, from);
-        appState.pendingGap.to = Math.max(appState.pendingGap.to, to);
-    } else {
-        appState.pendingGap = { from: from, to: to };
-        showToast("Aufzeichnung war " + formatDuration(to - from) + " unterbrochen.", 5000);
-    }
+    if (appState.pendingGap) { appState.pendingGap.from = Math.min(appState.pendingGap.from, from); appState.pendingGap.to = Math.max(appState.pendingGap.to, to); } 
+    else { appState.pendingGap = { from: from, to: to }; showToast("Aufzeichnung war unterbrochen.", 5000); }
 }
 
-// Fügt einen Punkt zum Weg hinzu – ausser er ist zu ungenau oder zu nah am letzten
 function addTrackPoint(latLng, accuracy, time) {
-    if (accuracy > MAX_ACCURACY) {
-        return;
-    }
-
+    if (accuracy > MAX_ACCURACY) return;
     let points = appState.trackPoints;
 
-    // Gab es seit dem letzten Punkt eine Lücke? → neues Teilstück beginnen
+    // NEU: Auto-Stop Logik (Anker aktualisieren)
+    if (!appState.idleAnchor || map.distance([appState.idleAnchor.lat, appState.idleAnchor.lng], latLng) > AUTOSTOP_DIST) {
+        appState.idleAnchor = { lat: latLng.lat, lng: latLng.lng, time: Date.now() };
+        appState.autoStopWarned = false; // Reset Warnung
+    }
+
     if (appState.pendingGap) {
-        if (points.length > 0) {
-            appState.currentSeg++;
-            appState.trackGaps.push(appState.pendingGap);
-        }
+        if (points.length > 0) { appState.currentSeg++; appState.trackGaps.push(appState.pendingGap); }
         appState.pendingGap = null;
     } else if (points.length > 0) {
-        let last = points[points.length - 1];
-        if (map.distance([last.lat, last.lng], latLng) < MIN_POINT_DISTANCE) {
-            return;
-        }
+        if (map.distance([points[points.length - 1].lat, points[points.length - 1].lng], latLng) < MIN_POINT_DISTANCE) return;
     }
 
     points.push({ lat: latLng.lat, lng: latLng.lng, time: time, seg: appState.currentSeg });
-    drawTrack();
-    saveTrack();
+    drawTrack(); saveTrack();
 }
 
-// Zeichnet den Weg neu: jedes Teilstück blau, Lücken grau gestrichelt
 function drawTrack() {
     appState.track.clearLayers();
-    let points = appState.trackPoints;
-    if (points.length === 0) return;
-
-    // Punkte nach Teilstück gruppieren
-    let segments = [];
-    points.forEach(function (p) {
-        if (!segments[p.seg]) segments[p.seg] = [];
-        segments[p.seg].push([p.lat, p.lng]);
-    });
-    segments = segments.filter(Boolean);
-
-    segments.forEach(function (seg, i) {
-        // Lücke zum vorherigen Teilstück
-        if (i > 0) {
-            let prev = segments[i - 1];
-            L.polyline([prev[prev.length - 1], seg[0]], {
-                color: '#8a93a8',
-                weight: 3,
-                dashArray: '4 8'
-            }).addTo(appState.track);
-        }
-        L.polyline(seg, {
-            color: '#3b7ddd',
-            weight: 5,
-            opacity: 0.9
-        }).addTo(appState.track);
+    let segments = groupBySegment(appState.trackPoints);
+    segments.forEach((seg, i) => {
+        if (i > 0) L.polyline([segments[i-1][segments[i-1].length - 1], seg[0]], { color: '#8a93a8', weight: 3, dashArray: '4 8' }).addTo(appState.track);
+        L.polyline(seg, { color: '#3b7ddd', weight: 5, opacity: 0.9 }).addTo(appState.track);
     });
 }
 
-// Zeigt die vergangene Zeit als hh:mm:ss an – und erkennt eingefrorene Seiten
 function updateTimer() {
     let now = Date.now();
-
-    // Läuft der Timer nach einer Pause erst jetzt wieder, war die Seite eingefroren
-    if (appState.lastTick) {
-        noteGap(appState.lastTick, now);
-    }
+    if (appState.lastTick) noteGap(appState.lastTick, now);
     appState.lastTick = now;
 
+    // NEU: Auto-Stop Überprüfung
+    if (appState.idleAnchor) {
+        let idleTime = now - appState.idleAnchor.time;
+        if (idleTime >= AUTOSTOP_TIME) {
+            showDialog({ title: "Automatisch gestoppt", text: "Du warst länger als 30 Minuten am selben Ort. Die Aufzeichnung wurde beendet." });
+            attemptStopTracking();
+            return;
+        } else if (idleTime >= AUTOWARN_TIME && !appState.autoStopWarned) {
+            let leftMin = Math.ceil((AUTOSTOP_TIME - idleTime) / 60000);
+            showToast(`Du bist seit 25 Min am gleichen Ort. Stopp in ${leftMin} Minuten.`, 8000);
+            appState.autoStopWarned = true;
+        }
+    }
+
     let seconds = Math.floor((now - appState.trackStart) / 1000);
-    let h = Math.floor(seconds / 3600);
-    let m = Math.floor((seconds % 3600) / 60);
-    let s = seconds % 60;
-    $("#timer").text([h, m, s].map(n => String(n).padStart(2, "0")).join(":"));
+    $("#timer").text([Math.floor(seconds / 3600), Math.floor((seconds % 3600) / 60), seconds % 60].map(n => String(n).padStart(2, "0")).join(":"));
 }
 
-// Macht aus Millisekunden z. B. «45 s» oder «3 Min.»
-function formatDuration(ms) {
-    let seconds = Math.round(ms / 1000);
-    if (seconds < 60) return seconds + " s";
-    let minutes = Math.round(seconds / 60);
-    if (minutes < 60) return minutes + " Min.";
-    return Math.floor(minutes / 60) + " h " + (minutes % 60) + " Min.";
-}
-
-// Schaltet die Leiste zwischen «LOS» (weiss) und «STOP» (rot) um
 function setTrackUi(active) {
     $("#trackBar").toggleClass("active", active);
     $("#trackLabel").text(active ? "Weg beenden:" : "Weg starten:");
     $("#trackBtn").text(active ? "Stop" : "Los");
     $("#timer").toggleClass("hidden", !active);
+    $("#discardBtn").toggleClass("hidden", !active); // Mülleimer anzeigen/verstecken
 }
 
-// ------- Zwischenspeichern im Browser (localStorage) -------
-// Falls der Browser die Seite im Hintergrund schliesst, geht der Weg nicht verloren.
-
-function saveTrack() {
-    try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({
-            trackStart: appState.trackStart,
-            points: appState.trackPoints,
-            gaps: appState.trackGaps,
-            currentSeg: appState.currentSeg,
-            savedAt: Date.now()
-        }));
-    } catch (err) {
-        console.warn("Weg konnte nicht zwischengespeichert werden:", err);
-    }
-}
-
-function clearSavedTrack() {
-    try {
-        localStorage.removeItem(STORAGE_KEY);
-    } catch (err) {
-        // egal
-    }
-}
-
+// Storage Functions
+function saveTrack() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ trackStart: appState.trackStart, points: appState.trackPoints, gaps: appState.trackGaps, currentSeg: appState.currentSeg, savedAt: Date.now() })); } catch (err) {} }
+function clearSavedTrack() { try { localStorage.removeItem(STORAGE_KEY); } catch (err) {} }
 async function restoreTrack() {
-    let saved;
-    try {
-        saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    } catch (err) {
-        return;
-    }
+    let saved; try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (err) { return; }
     if (!saved || !saved.trackStart) return;
-
-    let startTime = new Date(saved.trackStart).toLocaleTimeString("de-CH", { hour: "2-digit", minute: "2-digit" });
-    let resume = await showDialog({
-        title: "Weg fortsetzen?",
-        text: "Es gibt eine unterbrochene Aufzeichnung (gestartet um " + startTime + ").",
-        ok: "Fortsetzen",
-        cancel: "Verwerfen"
-    });
-
-    if (!resume) {
-        clearSavedTrack();
-        return;
-    }
-
-    appState.tracking = true;
-    appState.trackStart = saved.trackStart;
-    appState.trackPoints = saved.points || [];
-    appState.trackGaps = saved.gaps || [];
-    appState.currentSeg = saved.currentSeg || 0;
-    appState.pendingGap = null;
-
-    // Die Zeit, in der die Seite zu war, ist eine Lücke
-    let lastTime = appState.trackPoints.length > 0
-        ? appState.trackPoints[appState.trackPoints.length - 1].time
-        : saved.savedAt;
-    noteGap(lastTime, Date.now());
-
-    drawTrack();
-    startTrackingUi();
+    if (!(await showDialog({ title: "Weg fortsetzen?", text: "Es gibt eine unterbrochene Aufzeichnung.", ok: "Fortsetzen", cancel: "Verwerfen" }))) return clearSavedTrack();
+    
+    appState.tracking = true; appState.trackStart = saved.trackStart; appState.trackPoints = saved.points || [];
+    appState.trackGaps = saved.gaps || []; appState.currentSeg = saved.currentSeg || 0;
+    noteGap((appState.trackPoints.length > 0 ? appState.trackPoints[appState.trackPoints.length - 1].time : saved.savedAt), Date.now());
+    drawTrack(); startTrackingUi();
 }
-
-// ------- Eigenes Dialogfenster (statt alert/confirm des Browsers) -------
-// Gibt ein Promise zurück: true = OK gedrückt, false = Abbrechen.
-// Beispiel:  let ja = await showDialog({ title: "...", text: "...", ok: "Ja", cancel: "Nein" });
-// Ohne «cancel» erscheint nur der OK-Knopf (wie alert).
 
 function showDialog(options) {
-    return new Promise(function (resolve) {
-        $("#dialogTitle").text(options.title || "");
-        $("#dialogText").text(options.text || "");
-        $("#dialogOk").text(options.ok || "OK");
-
-        let cancelBtn = $("#dialogCancel");
-        if (options.cancel) {
-            cancelBtn.text(options.cancel).show();
-        } else {
-            cancelBtn.hide();
-        }
-
-        $("#dialog").removeClass("hidden");
-        $("#dialogOk").trigger("focus");
-
-        function close(result) {
-            $("#dialog").addClass("hidden");
-            $("#dialogOk, #dialogCancel").off("click");
-            resolve(result);
-        }
-
-        $("#dialogOk").on("click", function () { close(true); });
-        $("#dialogCancel").on("click", function () { close(false); });
+    return new Promise(resolve => {
+        $("#dialogTitle").text(options.title || ""); $("#dialogText").text(options.text || ""); $("#dialogOk").text(options.ok || "OK");
+        if (options.cancel) $("#dialogCancel").text(options.cancel).show(); else $("#dialogCancel").hide();
+        $("#dialog").removeClass("hidden"); $("#dialogOk").trigger("focus");
+        let close = res => { $("#dialog").addClass("hidden"); $("#dialogOk, #dialogCancel").off("click"); resolve(res); };
+        $("#dialogOk").on("click", () => close(true)); $("#dialogCancel").on("click", () => close(false));
     });
 }
 
-// ------- Kurze Hinweise unten auf der Karte -------
-
 let toastTimeout = null;
-
 function showToast(text, ms) {
-    $("#toast").text(text).addClass("visible");
-    clearTimeout(toastTimeout);
-    toastTimeout = setTimeout(function () {
-        $("#toast").removeClass("visible");
-    }, ms || 4000);
+    $("#toast").text(text).addClass("visible"); clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => $("#toast").removeClass("visible"), ms || 4000);
 }
 
-// ------- Bildschirm wach halten -------
-// (bei gesperrtem Bildschirm liefert der Browser keine Positionen mehr)
+async function requestWakeLock() { if ("wakeLock" in navigator) try { appState.wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {} }
+function releaseWakeLock() { if (appState.wakeLock) { appState.wakeLock.release(); appState.wakeLock = null; } }
 
-async function requestWakeLock() {
-    if (!("wakeLock" in navigator)) {
-        return;
-    }
-    try {
-        appState.wakeLock = await navigator.wakeLock.request("screen");
-    } catch (err) {
-        console.warn("Bildschirm-Sperre konnte nicht verhindert werden:", err);
-    }
-}
-
-function releaseWakeLock() {
-    if (appState.wakeLock) {
-        appState.wakeLock.release();
-        appState.wakeLock = null;
-    }
-}
-
-// ------- Start-Bildschirm: Angaben zur Person + Datenschutz -------
-// Erscheint beim ersten Öffnen. Die Angaben werden im Browser gespeichert,
-// damit man sie nicht jedes Mal neu eingeben muss.
-
+// ------- Onboarding / Profil -------
 const PROFILE_KEY = "safesteps_user";
 
 function initOnboarding() {
-    $("#onboardingForm").on("submit", function (event) {
-        event.preventDefault();
-        submitOnboarding();
-    });
-
-    $("#closeOnboardingBtn").on("click", closeOnboarding);
-
-    $("#editProfileBtn").on("click", function () {
-        setSheetOpen(false);
-        openOnboarding(true);
-    });
-
+    $("#onboardingForm").on("submit", e => { e.preventDefault(); submitOnboarding(); });
+    $("#closeOnboardingBtn").on("click", () => $("#onboarding").addClass("hidden"));
+    $("#editProfileBtn").on("click", () => { setSheetOpen(false); openOnboarding(true); });
     appState.user = loadProfile();
-    if (!appState.user) {
-        openOnboarding(false); // erster Start
-    }
+    
+    if (!appState.user) openOnboarding(false);
+    else updateUsernameDisplay(); // Username Banner aktualisieren
 }
 
-// editMode = true: Angaben ändern (mit X zum Schliessen)
-// editMode = false: erster Start (muss ausgefüllt werden)
 function openOnboarding(editMode) {
-    let form = $("#onboardingForm");
-    form.trigger("reset");
-    form.data("editMode", editMode);
-
-    // Bisherige Angaben eintragen
-    let user = appState.user;
-    if (user) {
-        $("#gender").val(user.gender);
-        $("#ageGroup").val(user.age_group);
-        $("input[name='familiarity'][value='" + user.familiarity + "']").prop("checked", true);
-        $("#consent").prop("checked", user.consent === true);
+    let form = $("#onboardingForm"); form.trigger("reset"); form.data("editMode", editMode);
+    if (appState.user) {
+        $("#username").val(appState.user.username);
+        $("#gender").val(appState.user.gender);
+        $("#ageGroup").val(appState.user.age_group);
+        $("input[name='familiarity'][value='" + appState.user.familiarity + "']").prop("checked", true);
+        $("#consent").prop("checked", appState.user.consent === true);
     }
-
     $("#onboardingTitle").text(editMode ? "Meine Angaben" : "Willkommen bei Safe Steps");
     $("#onboardingSubmit").text(editMode ? "Speichern" : "Starten");
-    $("#closeOnboardingBtn").toggle(editMode);
-    $("#onboarding").removeClass("hidden");
-}
-
-function closeOnboarding() {
-    $("#onboarding").addClass("hidden");
+    $("#closeOnboardingBtn").toggle(editMode); $("#onboarding").removeClass("hidden");
 }
 
 function submitOnboarding() {
+    let username = $("#username").val().trim();
     let gender = $("#gender").val();
     let ageGroup = $("#ageGroup").val();
     let familiarity = $("input[name='familiarity']:checked").val();
     let consent = $("#consent").prop("checked");
 
-    if (!gender || !ageGroup || familiarity === undefined) {
-        showDialog({ title: "Angaben fehlen", text: "Bitte beantworte alle Fragen. Du kannst auch «keine Angabe» wählen." });
-        return;
-    }
-    if (!consent) {
-        showDialog({ title: "Einwilligung fehlt", text: "Ohne dein Einverständnis können wir keine Daten speichern." });
-        return;
-    }
+    if (!username || !gender || !ageGroup || familiarity === undefined) return showDialog({ title: "Angaben fehlen", text: "Bitte beantworte alle Fragen." });
+    if (!consent) return showDialog({ title: "Einwilligung fehlt", text: "Ohne dein Einverständnis können wir keine Daten speichern." });
 
     let editMode = $("#onboardingForm").data("editMode");
-    let oldUser = appState.user;
-
     appState.user = {
-        user_id: oldUser ? oldUser.user_id : null, // kommt später von der Datenbank
-        gender: gender,
-        age_group: ageGroup,
-        familiarity: familiarity === "true",
-        consent: true,
-        created_at: oldUser ? oldUser.created_at : new Date().toISOString()
+        user_id: appState.user ? appState.user.user_id : null,
+        username: username, gender: gender, age_group: ageGroup, familiarity: familiarity === "true", consent: true,
+        created_at: appState.user ? appState.user.created_at : new Date().toISOString()
     };
     saveProfile(appState.user);
-    console.log("Angaben gespeichert:", appState.user);
+    updateUsernameDisplay();
 
-    // Erster Start: User in der Datenbank anlegen (wfs.js) und die neue ID merken.
-    // TODO: Beim Bearbeiten den User per WFS-T Update ändern.
-    if (!editMode) {
-        dbInsertUser(appState.user)
-            .then(function (result) {
-                if (result.id !== null) {
-                    appState.user.user_id = result.id;
-                    saveProfile(appState.user);
-                }
-            })
-            .catch(function (err) {
-                console.error("User konnte nicht angelegt werden:", err);
-            });
-    }
-
-    closeOnboarding();
-    showToast(editMode ? "Angaben gespeichert." : "Danke! Du kannst jetzt loslegen.");
+    if (!editMode) dbInsertUser(appState.user).then(r => { if (r.id !== null) { appState.user.user_id = r.id; saveProfile(appState.user); } }).catch(e => console.error(e));
+    $("#onboarding").addClass("hidden"); showToast(editMode ? "Angaben gespeichert." : "Danke! Du kannst jetzt loslegen.");
 }
 
-function loadProfile() {
-    try {
-        return JSON.parse(localStorage.getItem(PROFILE_KEY));
-    } catch (err) {
-        return null;
+function updateUsernameDisplay() {
+    if (appState.user && appState.user.username) {
+        $("#topUsername").html('<i class="fa-solid fa-user"></i> ' + escapeXml(appState.user.username)).removeClass("hidden");
     }
 }
 
-function saveProfile(user) {
-    try {
-        localStorage.setItem(PROFILE_KEY, JSON.stringify(user));
-    } catch (err) {
-        console.warn("Angaben konnten nicht gespeichert werden:", err);
-    }
-}
+function loadProfile() { try { return JSON.parse(localStorage.getItem(PROFILE_KEY)); } catch (e) { return null; } }
+function saveProfile(user) { try { localStorage.setItem(PROFILE_KEY, JSON.stringify(user)); } catch (e) {} }
 
-// ------- Panel «Anzeigeoptionen» -------
-
+// ------- Panel Optionen -------
 function initOptionsSheet() {
-    // Startzustand: beide Schalter an, beide Ebenen sichtbar.
-    // (Manche Browser, z. B. Firefox, merken sich sonst den alten Schalterstand
-    //  beim Neuladen – dann passen Schalter und Karte nicht zusammen.)
-    $("#toggleReports").prop("checked", true);
-    $("#toggleLocation").prop("checked", true);
-    showLayer(appState.reports, true);
-    showLayer(appState.markers, true);
+    $("#toggleReports").prop("checked", true); $("#toggleLocation").prop("checked", true); $("#togglePastTracks").prop("checked", true);
+    showLayer(appState.reports, true); showLayer(appState.markers, true); showLayer(appState.pastTracks, true);
 
-    // Auf-/Zuklappen durch Tippen auf den Kopf
-    $("#sheetHandle").on("click", function () {
-        setSheetOpen(!$("#optionsSheet").hasClass("open"));
-    });
-
-    // Wischen: nach oben = öffnen, nach unten = schliessen
+    $("#sheetHandle").on("click", () => setSheetOpen(!$("#optionsSheet").hasClass("open")));
     let startY = null;
-    $("#sheetHandle").on("touchstart", function (e) {
-        startY = e.originalEvent.touches[0].clientY;
-    });
-    $("#sheetHandle").on("touchend", function (e) {
-        if (startY === null) return;
-        let deltaY = e.originalEvent.changedTouches[0].clientY - startY;
-        if (deltaY < -30) setSheetOpen(true);
-        if (deltaY > 30) setSheetOpen(false);
-        startY = null;
-    });
+    $("#sheetHandle").on("touchstart", e => startY = e.originalEvent.touches[0].clientY);
+    $("#sheetHandle").on("touchend", e => { if (startY === null) return; let dY = e.originalEvent.changedTouches[0].clientY - startY; if (dY < -30) setSheetOpen(true); if (dY > 30) setSheetOpen(false); startY = null; });
 
-    // Schalter «Vergangene Meldungen»
-    $("#toggleReports").on("change", function () {
-        showLayer(appState.reports, this.checked);
+    $("#toggleReports").on("change", function () { showLayer(appState.reports, this.checked); });
+    $("#togglePastTracks").on("change", function () { showLayer(appState.pastTracks, this.checked); }); // NEU
+    $("#toggleLocation").on("change", function () { showLayer(appState.markers, this.checked); if (this.checked) drawMarkers(); });
+    // Info-Knopf Klick-Logik
+    $("#infoBtn").on("click", function() {
+        setSheetOpen(false);
+        $("#infoModal").removeClass("hidden");
     });
-
-    // Schalter «Standort anzeigen»
-    $("#toggleLocation").on("change", function () {
-        showLayer(appState.markers, this.checked);
-        if (this.checked) {
-            drawMarkers(); // beim Einblenden gleich die aktuelle Position zeichnen
-        }
+    
+    $("#closeInfoBtn").on("click", function() {
+        $("#infoModal").addClass("hidden");
     });
 }
 
-function setSheetOpen(open) {
-    $("#optionsSheet").toggleClass("open", open);
-    $("#sheetHandle").attr("aria-expanded", open);
-}
+function setSheetOpen(open) { $("#optionsSheet").toggleClass("open", open); $("#sheetHandle").attr("aria-expanded", open); }
+function showLayer(layer, visible) { visible ? map.addLayer(layer) : map.removeLayer(layer); }
+function escapeXml(text) { return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;"); }
+// ------- Standort-Knopf (oben rechts) -------
 
-// Blendet eine Ebene auf der Karte ein oder aus
-function showLayer(layer, visible) {
-    if (visible) {
-        map.addLayer(layer);
-    } else {
-        map.removeLayer(layer);
-    }
-}
-
-// ------- Standort-Knopf -------
-
-// Springt zurück zum eigenen Standort
 function goToMyLocation() {
     if (appState.latLng) {
         map.flyTo(appState.latLng, 17);
@@ -848,7 +486,6 @@ function goToMyLocation() {
     }
 }
 
-// Eigener Leaflet-Knopf mit Pfeil
 const LocateControl = L.Control.extend({
     options: { position: 'topright' },
     onAdd: function () {
