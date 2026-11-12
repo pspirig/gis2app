@@ -98,27 +98,14 @@
         <h2 class="modal-title">Meldung erfassen</h2>
         <!-- Speichert temporäre ID der laufenden Meldung -->
         <form id="fillInForm" data-report-id="">
-            <div class="form-section">
-                <label for="safety" class="form-label">Sicherheitsgefühl:</label>
-                <select id="safety" name="safety" class="form-field">
-                    <option value="unsicher">unsicher</option>
-                    <option value="sehr unsicher">sehr unsicher</option>
-                    <option value="gefährlich">gefährlich</option>
-                </select>
-            </div>
-
-            <div class="form-section">
-                <span class="form-label">Kategorien:</span>
-                <label class="check-row"><input type="checkbox" name="category" value="Schlechte Beleuchtung"><span>Schlechte Beleuchtung</span></label>
-                <label class="check-row"><input type="checkbox" name="category" value="Belästigung"><span>Belästigung</span></label>
-                <label class="check-row"><input type="checkbox" name="category" value="Unberechenbares Verhalten"><span>Unberechenbares Verhalten</span></label>
-                <label class="check-row"><input type="checkbox" name="category" value="Diebstahl"><span>Diebstahl</span></label>
-                <label class="check-row"><input type="checkbox" name="category" value="anderes"><span>anderes</span></label>
-            </div>
-
+            <!-- Nur eine Kategorie wählbar (Radio-Buttons) → Spalte reason_category -->
             <div class="form-section last">
-                <label for="remark" class="form-label">Bemerkungen:</label>
-                <input type="text" id="remark" name="remark" class="form-field" placeholder="z. B. Laterne kaputt..." autocomplete="off">
+                <span class="form-label">Kategorie:</span>
+                <label class="check-row"><input type="radio" name="category" value="Schlechte Beleuchtung"><span>Schlechte Beleuchtung</span></label>
+                <label class="check-row"><input type="radio" name="category" value="Belästigung"><span>Belästigung</span></label>
+                <label class="check-row"><input type="radio" name="category" value="Unberechenbares Verhalten"><span>Unberechenbares Verhalten</span></label>
+                <label class="check-row"><input type="radio" name="category" value="Diebstahl"><span>Diebstahl</span></label>
+                <label class="check-row"><input type="radio" name="category" value="anderes"><span>anderes</span></label>
             </div>
 
             <button type="submit" class="btn-send">Speichern</button>
@@ -158,17 +145,11 @@
                 </select>
             </div>
 
+            <!-- Alter als ganze Zahl → Spalte age (integer) -->
             <div class="form-section">
-                <label for="ageGroup" class="form-label">Altersgruppe:</label>
-                <select id="ageGroup" name="ageGroup" class="form-field">
-                    <option value="" disabled selected>Bitte wählen</option>
-                    <option value="18-24">18–24</option>
-                    <option value="25-34">25–34</option>
-                    <option value="35-49">35–49</option>
-                    <option value="50-64">50–64</option>
-                    <option value="65+">65+</option>
-                    <option value="keine Angabe">keine Angabe</option>
-                </select>
+                <label for="age" class="form-label">Alter:</label>
+                <input type="number" id="age" name="age" class="form-field" min="10" max="110" step="1"
+                       inputmode="numeric" placeholder="z. B. 23" autocomplete="off">
             </div>
 
             <div class="form-section">
@@ -180,7 +161,7 @@
             <div class="form-section last">
                 <span class="form-label">Datenschutz:</span>
                 <p class="privacy-text">
-                    Safe Steps speichert deine Wege und Meldungen. Die Daten werden für ein Studienprojekt an der ETH Zürich verwendet.
+                    Safe Steps speichert deinen Username, deine Angaben (Geschlecht, Alter, Ortskenntnis) sowie deine Wege und Meldungen. Die Daten werden für ein Studienprojekt an der ETH Zürich verwendet.
                 </p>
                 <label class="consent-row">
                     <input type="checkbox" id="consent" name="consent">

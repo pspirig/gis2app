@@ -1,43 +1,57 @@
-# Datenbank: offene Punkte zum Besprechen
+# Datenbank & GeoServer: Stand und offene Punkte
 
-Abgleich zwischen dem Datenbankschema (`gta26_g1`) und dem, was die App erfasst.
-Stand: 8. November 2026
+Abgleich zwischen dem Datenbankschema (`gta26_g1`) und der App.
+Stand: 12. November 2026
 
-## Tabelle `unsafe_point` (Meldungen)
+## Erledigt
 
-1. **Sicherheitsgefühl fehlt.** Die App erfasst eine Stufe von 1 (sehr unsicher) bis 5 (sehr sicher).
-   → Spalte ergänzen, z. B. `safety integer`.
-2. **Bemerkung fehlt.** Die App hat ein Freitextfeld.
-   → Spalte ergänzen, z. B. `remark text`.
-3. **Mehrere Kategorien.** Man kann mehrere Kategorien gleichzeitig ankreuzen, die Tabelle hat aber nur `reason_category text`.
-   Aktuell schreibt die App sie mit Komma getrennt hinein (`"Belästigung, Diebstahl"`).
-   → So lassen, oder als Liste speichern (`text[]`), oder in einer eigenen Tabelle?
-4. **`track_id` bei Meldungen während eines Wegs.** Der Weg wird erst beim «Stop» gespeichert, seine ID ist beim Melden also noch nicht bekannt.
-   → Möglichkeiten: Weg schon beim «Los» anlegen und beim «Stop» ergänzen, Meldungen nachträglich zuordnen, oder `track_id` leer lassen und später über Zeit und Ort verknüpfen.
+| # | Punkt | Entscheid / Umsetzung |
+|---|---|---|
+| 1 | Sicherheitsgefühl | wird nicht mehr erfasst, Feld aus dem Formular entfernt |
+| 2 | Bemerkung | Feld aus dem Formular entfernt |
+| 3 | Mehrere Kategorien | nur noch **eine** Kategorie wählbar (Radio-Buttons) → `reason_category`; leer erlaubt → NULL |
+| 4 | `track_id` bei Meldungen | Meldungen während einer Aufzeichnung werden gesammelt und erst bei «Stop» gespeichert, dann mit der `track_id` des Wegs. Weg verworfen / zu kurz / Fehler → Meldungen werden trotzdem gespeichert, mit `track_id` = NULL |
+| 5 | Alter | Eingabe als Zahl (10–110) → `age integer` |
+| 6 | Username | wird gespeichert, Datenschutztext angepasst |
+| 7 | `tackingactive` | Tippfehler bleibt. Die App verwendet die Spalte nicht. Falls doch einmal: genau so schreiben |
+| 8 | Einwilligung | wird nicht gespeichert. Die App lässt sich nur mit Einwilligung starten |
+| 9 | Tabellenname `user` | bleibt so (siehe unten) |
+| 11 | Geometrie-Typ / Koordinatensystem | im Code gelöst (siehe unten) |
+| 12 | Zeitstempel pro GPS-Punkt | nicht nötig. Für die Forschungsfrage braucht es nur den Weg, Start-/Endzeit sind gespeichert |
+| 13 | Layer im GeoServer veröffentlicht | erledigt |
+| 14 | WFS mit Schreibrechten | erledigt |
 
-## Tabelle `user`
+### Zu 9: Tabellenname `user`
 
-5. **Alter:** Die Tabelle hat `age integer`, die App erfasst Altersgruppen wie `"18-24"` oder `"keine Angabe"`.
-   → Spalte ändern zu `age_group text`?
-6. **`username`:** Laut Datenschutztext in der App ist sie anonym (ohne Namen).
-   → Spalte entfernen oder immer leer lassen?
-7. **`tackingactive`:** Tippfehler (`trackingactive`)? Und wird die Spalte gebraucht? Die App merkt sich eine laufende Aufzeichnung bereits im Browser.
-8. **Einwilligung:** Die App fragt nach dem Einverständnis zur Datennutzung, die Tabelle speichert es aber nicht.
-   → Für das Forschungsprojekt sinnvoll? z. B. `consent boolean`, `created_at timestamptz`.
-9. **Tabellenname `user`:** Das ist in PostgreSQL ein reserviertes Wort und muss überall in Anführungszeichen stehen (`"user"`). Das kann im GeoServer und in SQL-Abfragen Probleme machen.
-   → Umbenennen, z. B. in `app_user`?
+Kein grosses Problem, darum bleibt er:
+- **WFS / GeoServer:** keine Probleme. GeoServer setzt die Anführungszeichen selbst.
+- **Eigenes SQL** (z. B. später in Python oder pgAdmin): immer `gta26_g1."user"` schreiben. Ohne Anführungszeichen meint PostgreSQL mit `user` den eingeloggten Datenbank-User.
 
-## Alle Tabellen
+### Zu 11: Geometrie
 
-10. **IDs automatisch vergeben:** `user_id`, `track_id` und `unsafe_point_id` müssen von der Datenbank selbst hochgezählt werden (`serial` oder `GENERATED ALWAYS AS IDENTITY`). Sonst funktioniert das Speichern über WFS-T nicht.
-11. **Geometrie-Typ und Koordinatensystem festlegen:** Die App schickt Längen-/Breitengrade (EPSG:4326).
-    - `unsafe_point.geometry` → `geometry(Point, 4326)`
-    - `actual_track.geometry` → `geometry(MultiLineString, 4326)` (ein Weg kann durch Unterbrüche aus mehreren Teilstücken bestehen)
-12. **Zeitstempel pro GPS-Punkt:** Gespeichert werden nur Start- und Endzeit des Wegs, die Zeit jedes einzelnen Punkts geht verloren.
-    → Reicht das für die Analyse, oder braucht es die Punkte einzeln (z. B. eine eigene Tabelle `track_point`)?
+Die Spalten haben den allgemeinen Typ `geometry`, also ohne festen Typ und ohne Koordinatensystem. Das passt zur App:
+- Meldungen werden als `Point` geschickt, Wege als `MultiLineString` (ein Weg mit Unterbrüchen besteht aus mehreren Teilstücken).
+- Die App schickt immer Längen-/Breitengrade (**EPSG:4326**).
+- Wichtig ist nur, dass die Layer im GeoServer das Koordinatensystem **EPSG:4326** haben (siehe offene Punkte).
 
-## GeoServer
+## Offen
 
-13. Die Tabellen `user`, `unsafe_point` und `actual_track` als Layer in einem Workspace veröffentlichen.
-14. WFS mit Schreibrechten einschalten (Service-Level «Transactional») und das Schreiben auf die Layer erlauben.
-15. Danach in `frontend/js/config.js` Workspace, Namespace-URI und Layer-Namen eintragen und `enabled: true` setzen.
+### A. IDs automatisch vergeben (Punkt 10) – wichtig, bevor die App live geht
+`user_id`, `track_id` und `unsafe_point_id` muss die Datenbank selbst hochzählen, sonst funktioniert das Speichern über WFS-T nicht, und die App bekommt keine ID zurück.
+- Prüfen und beheben mit `docs/sql/ids_automatisch.sql` (Anleitung in der Datei).
+- Das ändert nur die ID-Spalten. Die WFS-Verbindung muss **nicht** neu gemacht werden. Danach im GeoServer beim Layer einmal «Speichern» bzw. den Store neu laden.
+- Der letzte Block der SQL-Datei zeigt, ob es noch andere Pflichtfelder gibt (z. B. `tackingactive NOT NULL`), die die App nicht befüllt.
+
+### B. GeoServer-Angaben in die App eintragen (Punkt 15)
+In `frontend/js/config.js` eintragen:
+- [ ] WFS-URL (z. B. `https://baug-ikg-gis-01.ethz.ch:8443/geoserver/<workspace>/wfs`)
+- [ ] Workspace-Name
+- [ ] Namespace-URI des Workspace
+- [ ] Layer-Namen für `user`, `unsafe_point`, `actual_track`
+- [ ] Koordinatensystem der Layer prüfen: «Declared SRS» = EPSG:4326
+- [ ] `enabled: true` setzen und testen
+
+### C. Später (Feinheiten)
+- «Meine Angaben ändern» aktualisiert die Angaben bisher nur im Browser, nicht in der Datenbank (braucht WFS-T Update).
+- Daten, die im Platzhalter-Modus nur im Browser gespeichert wurden, nachträglich hochladen.
+- User ohne `user_id`: Wurde der User angelegt, als die Datenbank noch nicht verbunden war, haben seine Meldungen und Wege `user_id` = NULL.
