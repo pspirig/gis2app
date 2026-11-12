@@ -19,23 +19,30 @@ const PENDING_KEY = "safesteps_pending";
 
 
 // ------- Öffentliche Funktionen -------
+//
+// Die Felder stehen in derselben Reihenfolge wie die Spalten in der Tabelle
+// (inkl. geometry). user_id, track_id und unsafe_point_id fehlen absichtlich:
+// Diese IDs vergibt die Datenbank selbst.
+// Werte, die null sind, werden weggelassen → in der Datenbank steht dann NULL.
 
 function dbInsertUser(user) {
     return insertFeature(WFS_CONFIG.layers.user, {
+        username: user.username,
         gender: user.gender,
+        age: user.age,
         familiarity: user.familiarity
-        // TODO: age – Tabelle hat «age integer», die App erfasst eine Altersgruppe (Text)
-    }, null);
+        // tackingactive (sic, so heisst die Spalte) wird von der App nicht verwendet
+    });
 }
 
 function dbInsertReport(report) {
     return insertFeature(WFS_CONFIG.layers.report, {
         user_id: report.userId,
+        track_id: report.trackId,
         timestamp: report.time,
-        reason_category: report.categories.join(", ")
-        // TODO: Sicherheitsgefühl (1–5) und Bemerkung – dafür fehlen noch Spalten
-        // TODO: track_id – Meldung während einer Aufzeichnung dem Weg zuordnen
-    }, pointGml(report.lat, report.lng));
+        geometry: { gml: pointGml(report.lat, report.lng) },
+        reason_category: report.category
+    });
 }
 
 function dbInsertTrack(track) {
@@ -43,20 +50,21 @@ function dbInsertTrack(track) {
         user_id: track.userId,
         start_time: track.startTime,
         end_time: track.endTime,
+        geometry: { gml: multiLineGml(track.segments) },
         length: track.lengthM
-    }, multiLineGml(track.segments));
+    });
 }
 
 
 // ------- Ablauf: Platzhalter oder echter Insert -------
 
-function insertFeature(layer, properties, geometryGml) {
+function insertFeature(layer, properties) {
     if (!WFS_CONFIG.enabled) {
-        storePending(layer, properties, geometryGml);
+        storePending(layer, properties);
         return Promise.resolve({ id: null, pending: true });
     }
 
-    let xml = buildInsertXml(layer, properties, geometryGml);
+    let xml = buildInsertXml(layer, properties);
     return sendTransaction(xml).then(function (id) {
         return { id: id, pending: false };
     });
@@ -65,18 +73,17 @@ function insertFeature(layer, properties, geometryGml) {
 
 // ------- XML für die WFS-Transaktion bauen -------
 
-function buildInsertXml(layer, properties, geometryGml) {
+function buildInsertXml(layer, properties) {
     let ws = WFS_CONFIG.workspace;
     let fields = "";
 
     for (let [name, value] of Object.entries(properties)) {
         // Leere Werte weglassen → in der Datenbank steht dann NULL
         if (value === null || value === undefined) continue;
-        fields += "      <" + ws + ":" + name + ">" + escapeXml(value) + "</" + ws + ":" + name + ">\n";
-    }
 
-    if (geometryGml) {
-        fields += "      <" + ws + ":geometry>" + geometryGml + "</" + ws + ":geometry>\n";
+        // Geometrie ist schon fertiges GML → nicht escapen. Alles andere schon.
+        let content = (typeof value === "object" && value.gml) ? value.gml : escapeXml(value);
+        fields += "      <" + ws + ":" + name + ">" + content + "</" + ws + ":" + name + ">\n";
     }
 
     return '<wfs:Transaction service="WFS" version="1.0.0"\n'
@@ -168,11 +175,10 @@ function parseFeatureId(fid) {
 
 // ------- Platzhalter-Modus: im Browser zwischenspeichern -------
 
-function storePending(layer, properties, geometryGml) {
+function storePending(layer, properties) {
     let entry = {
         layer: layer,
         properties: properties,
-        geometryGml: geometryGml,
         savedAt: new Date().toISOString()
     };
     console.log("Platzhalter-Modus – nicht in die Datenbank geschrieben:", entry);

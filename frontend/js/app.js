@@ -29,7 +29,11 @@ let appState = {
     user: null,
 
     // NEU: Pending Reports
-    pendingReports: {} 
+    pendingReports: {},
+
+    // Meldungen, die während einer Aufzeichnung gespeichert wurden.
+    // Sie gehen erst bei «Stop» an die DB, damit sie die track_id des Wegs bekommen.
+    trackReports: []
 };
 
 function drawMarkers() {
@@ -153,22 +157,17 @@ function saveModalReport() {
     let rep = appState.pendingReports[rId];
     if (!rep) return;
 
-    let safety = $("#safety").val();
-    let categories = $("input[name='category']:checked").map(function(){ return this.value; }).get();
-    let remark = $("#remark").val().trim();
+    // Nur eine Kategorie wählbar (Radio-Buttons); nicht zwingend
+    let category = $("input[name='category']:checked").val() || null;
 
-    // Kategorien nicht zwingend bei Speicherung durch Formular
-    rep.safety = safety;
-    rep.categories = categories;
-    rep.remark = remark;
+    rep.category = category;
     rep.isFilled = true;
 
     // Marker voll machen und Popup binden
     rep.marker.setIcon(flagIconFull);
     rep.marker.off('click'); 
     
-    let popup = `<b>Sicherheitsgefühl: ${escapeXml(safety)}</b><br>` + escapeXml(categories.join(", ")) + (remark ? `<br><i>${escapeXml(remark)}</i>` : "");
-    rep.marker.bindPopup(popup);
+    rep.marker.bindPopup("<b>" + escapeXml(category || "Ohne Kategorie") + "</b>");
 
     // In DB schreiben
     sendReportToDB(rep);
@@ -178,13 +177,34 @@ function saveModalReport() {
     showToast("Meldung vollständig erfasst!");
 }
 
+// Meldung in die DB schreiben (wfs.js).
+// Läuft gerade eine Aufzeichnung, wird die Meldung nur gesammelt und erst bei «Stop»
+// gespeichert – erst dann kennen wir die track_id des Wegs.
 function sendReportToDB(report) {
     let finalReport = {
         userId: appState.user ? appState.user.user_id : null,
-        time: report.time, safety: report.safety || 'unbekannt', categories: report.categories || [],
-        remark: report.remark || '', lat: report.lat, lng: report.lng
+        trackId: null,
+        time: report.time,
+        category: report.category || null,
+        lat: report.lat, lng: report.lng
     };
+
+    if (appState.tracking) {
+        appState.trackReports.push(finalReport);
+        saveTrack(); // auch im Browser sichern, falls die App geschlossen wird
+        return;
+    }
     dbInsertReport(finalReport).catch(e => console.error(e));
+}
+
+// Speichert alle gesammelten Meldungen mit der track_id des Wegs.
+// trackId = null, wenn es keinen gespeicherten Weg gibt (verworfen, zu kurz, Fehler).
+function flushTrackReports(trackId) {
+    appState.trackReports.forEach(r => {
+        r.trackId = trackId;
+        dbInsertReport(r).catch(e => console.error(e));
+    });
+    appState.trackReports = [];
 }
 
 // ------- Weg aufzeichnen -------
@@ -216,6 +236,7 @@ function startTracking() {
     appState.tracking = true; appState.trackPoints = []; appState.trackGaps = [];
     appState.currentSeg = 0; appState.pendingGap = null; appState.hiddenAt = null;
     appState.trackStart = Date.now(); appState.idleAnchor = null; appState.autoStopWarned = false;
+    appState.trackReports = [];
 
     if (appState.latLng) addTrackPoint(appState.latLng, appState.accuracy, Date.now());
     drawTrack(); saveTrack(); startTrackingUi();
@@ -257,7 +278,10 @@ function stopTracking() {
     setTrackUi(false); clearSavedTrack();
 
     let points = appState.trackPoints;
-    if (points.length < 2) return showDialog({ title: "Kein Weg", text: "Es wurden zu wenige Punkte aufgezeichnet." });
+    if (points.length < 2) {
+        flushTrackReports(null); // Meldungen trotzdem speichern, nur ohne Weg
+        return showDialog({ title: "Kein Weg", text: "Es wurden zu wenige Punkte aufgezeichnet." });
+    }
 
     let distance = 0;
     for (let i = 1; i < points.length; i++) {
@@ -270,13 +294,17 @@ function stopTracking() {
         userId: appState.user ? appState.user.user_id : null,
         startTime: new Date(appState.trackStart).toISOString(),
         endTime: new Date().toISOString(), lengthM: Math.round(distance), segments: groupBySegment(points)
-    }).catch(e => console.error(e));
+    })
+        .then(r => flushTrackReports(r.id))                          // Weg gespeichert → Meldungen mit seiner ID
+        .catch(e => { console.error(e); flushTrackReports(null); }); // Fehler → Meldungen ohne Weg
 }
 
 // NEU: Weg verwerfen
 async function discardTracking() {
-    let ok = await showDialog({ title: "Aufzeichnung verwerfen?", text: "Dieser Weg wird gelöscht und nicht gespeichert.", ok: "Verwerfen", cancel: "Abbrechen" });
+    let ok = await showDialog({ title: "Aufzeichnung verwerfen?", text: "Dieser Weg wird gelöscht und nicht gespeichert. Deine Meldungen bleiben erhalten.", ok: "Verwerfen", cancel: "Abbrechen" });
     if (!ok) return;
+
+    flushTrackReports(null); // Meldungen ohne Weg speichern
 
     appState.tracking = false; clearInterval(appState.timerInterval); releaseWakeLock();
     setTrackUi(false); clearSavedTrack(); appState.track.clearLayers();
@@ -358,13 +386,17 @@ function setTrackUi(active) {
 }
 
 // Storage Functions
-function saveTrack() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ trackStart: appState.trackStart, points: appState.trackPoints, gaps: appState.trackGaps, currentSeg: appState.currentSeg, savedAt: Date.now() })); } catch (err) {} }
+function saveTrack() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ trackStart: appState.trackStart, points: appState.trackPoints, gaps: appState.trackGaps, currentSeg: appState.currentSeg, reports: appState.trackReports, savedAt: Date.now() })); } catch (err) {} }
 function clearSavedTrack() { try { localStorage.removeItem(STORAGE_KEY); } catch (err) {} }
 async function restoreTrack() {
     let saved; try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (err) { return; }
     if (!saved || !saved.trackStart) return;
-    if (!(await showDialog({ title: "Weg fortsetzen?", text: "Es gibt eine unterbrochene Aufzeichnung.", ok: "Fortsetzen", cancel: "Verwerfen" }))) return clearSavedTrack();
-    
+    appState.trackReports = saved.reports || [];
+    if (!(await showDialog({ title: "Weg fortsetzen?", text: "Es gibt eine unterbrochene Aufzeichnung.", ok: "Fortsetzen", cancel: "Verwerfen" }))) {
+        flushTrackReports(null); // Meldungen ohne Weg speichern
+        return clearSavedTrack();
+    }
+
     appState.tracking = true; appState.trackStart = saved.trackStart; appState.trackPoints = saved.points || [];
     appState.trackGaps = saved.gaps || []; appState.currentSeg = saved.currentSeg || 0;
     noteGap((appState.trackPoints.length > 0 ? appState.trackPoints[appState.trackPoints.length - 1].time : saved.savedAt), Date.now());
@@ -408,7 +440,7 @@ function openOnboarding(editMode) {
     if (appState.user) {
         $("#username").val(appState.user.username);
         $("#gender").val(appState.user.gender);
-        $("#ageGroup").val(appState.user.age_group);
+        $("#age").val(appState.user.age);
         $("input[name='familiarity'][value='" + appState.user.familiarity + "']").prop("checked", true);
         $("#consent").prop("checked", appState.user.consent === true);
     }
@@ -420,17 +452,18 @@ function openOnboarding(editMode) {
 function submitOnboarding() {
     let username = $("#username").val().trim();
     let gender = $("#gender").val();
-    let ageGroup = $("#ageGroup").val();
+    let age = parseInt($("#age").val(), 10);
     let familiarity = $("input[name='familiarity']:checked").val();
     let consent = $("#consent").prop("checked");
 
-    if (!username || !gender || !ageGroup || familiarity === undefined) return showDialog({ title: "Angaben fehlen", text: "Bitte beantworte alle Fragen." });
+    if (!username || !gender || isNaN(age) || familiarity === undefined) return showDialog({ title: "Angaben fehlen", text: "Bitte beantworte alle Fragen." });
+    if (age < 10 || age > 110) return showDialog({ title: "Alter prüfen", text: "Bitte gib dein Alter als Zahl ein." });
     if (!consent) return showDialog({ title: "Einwilligung fehlt", text: "Ohne dein Einverständnis können wir keine Daten speichern." });
 
     let editMode = $("#onboardingForm").data("editMode");
     appState.user = {
         user_id: appState.user ? appState.user.user_id : null,
-        username: username, gender: gender, age_group: ageGroup, familiarity: familiarity === "true", consent: true,
+        username: username, gender: gender, age: age, familiarity: familiarity === "true", consent: true,
         created_at: appState.user ? appState.user.created_at : new Date().toISOString()
     };
     saveProfile(appState.user);
@@ -475,7 +508,6 @@ function initOptionsSheet() {
 
 function setSheetOpen(open) { $("#optionsSheet").toggleClass("open", open); $("#sheetHandle").attr("aria-expanded", open); }
 function showLayer(layer, visible) { visible ? map.addLayer(layer) : map.removeLayer(layer); }
-function escapeXml(text) { return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;"); }
 // ------- Standort-Knopf (oben rechts) -------
 
 function goToMyLocation() {
