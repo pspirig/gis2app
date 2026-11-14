@@ -263,6 +263,30 @@ body::after {
     background: #ffffff;
 }
 
+/* Hinweis bei Übergriffen (unter der Kategorienauswahl) */
+.police-hint {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    font-size: 14px;
+    line-height: 1.4;
+    color: var(--red);
+    background: #fdecea;
+    border-left: 4px solid var(--red);
+    border-radius: 6px;
+}
+
+.police-hint i {
+    margin-top: 2px;
+}
+
+.police-hint a {
+    color: var(--red);
+    font-weight: 700;
+}
+
 /* Kategorien: runder Kreis links, Text rechts */
 .check-row {
     display: flex;

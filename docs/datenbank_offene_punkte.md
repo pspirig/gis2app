@@ -39,5 +39,5 @@ Stand: 8. November 2026
 ## GeoServer
 
 13. Die Tabellen `user`, `unsafe_point` und `actual_track` als Layer in einem Workspace veröffentlichen.
-14. WFS mit Schreibrechten einschalten (Service-Level «Transactional») und das Schreiben auf die Layer erlauben.
+14. WFS mit Schreibrechten einschalten (Service-Level «Tragit checkout -b feature/db-anpassungenuben.
 15. Danach in `frontend/js/config.js` Workspace, Namespace-URI und Layer-Namen eintragen und `enabled: true` setzen.
