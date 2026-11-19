@@ -263,6 +263,26 @@ body::after {
     background: #ffffff;
 }
 
+/* Hinweis bei Übergriffen (unter der Kategorienauswahl) */
+.police-hint {
+    display: flex;              /* Icon und Text nebeneinander */
+    align-items: flex-start;    /* oben ausrichten */
+    gap: 8px;                   /* Abstand Icon ↔ Text */
+    margin: 12px 0 0;           /* Abstand nach oben zu den Kategorien */
+    padding: 10px 12px;         /* Innenabstand */
+    font-size: 14px;
+    line-height: 1.4;
+    color: var(--red);          /* rote Schrift (Farbe aus eurem Design) */
+    background: #fdecea;        /* hellroter Hintergrund */
+    border-left: 4px solid var(--red);  /* roter Balken links */
+    border-radius: 6px;         /* abgerundete Ecken */
+}
+
+.police-hint i {
+    margin-top: 2px;            /* Icon leicht nach unten, auf Texthöhe */
+}
+
+
 /* Kategorien: runder Kreis links, Text rechts */
 .check-row {
     display: flex;
