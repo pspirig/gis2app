@@ -3,3 +3,9 @@ flask-cors
 psycopg2-binary
 pandas
 sqlalchemy
+geopandas
+shapely
+networkx
+osmnx
+leuvenmapmatching
+rtree
