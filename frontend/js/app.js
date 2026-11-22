@@ -207,6 +207,16 @@ function flushTrackReports(trackId) {
     appState.trackReports = [];
 }
 
+// Map Matching im Backend anstossen (config.js → BACKEND_CONFIG).
+// Das Backend matcht den Weg auf das OSM-Fussnetz und speichert ihn in matched_track.
+// Die App wartet nicht darauf; das Ergebnis steht nur in der Konsole.
+function requestMapMatching(trackId) {
+    if (typeof BACKEND_CONFIG === "undefined" || !BACKEND_CONFIG.enabled) return;
+    $.post(BACKEND_CONFIG.url + "/map_match/" + trackId)
+        .done(res => console.log("Map Matching:", res))
+        .fail(xhr => console.warn("Map Matching fehlgeschlagen (HTTP-Status " + xhr.status + "):", xhr.responseJSON || ""));
+}
+
 // ------- Weg aufzeichnen -------
 const MIN_POINT_DISTANCE = 3;
 const MAX_ACCURACY = 50;
@@ -295,7 +305,10 @@ function stopTracking() {
         startTime: new Date(appState.trackStart).toISOString(),
         endTime: new Date().toISOString(), lengthM: Math.round(distance), segments: groupBySegment(points)
     })
-        .then(r => flushTrackReports(r.id))                          // Weg gespeichert → Meldungen mit seiner ID
+        .then(r => {
+            flushTrackReports(r.id);                         // Weg gespeichert → Meldungen mit seiner ID
+            if (r.id !== null) requestMapMatching(r.id);     // nur wenn der Weg wirklich in der DB ist
+        })
         .catch(e => { console.error(e); flushTrackReports(null); }); // Fehler → Meldungen ohne Weg
 }
 
@@ -529,4 +542,4 @@ const LocateControl = L.Control.extend({
         L.DomEvent.on(btn, 'click', goToMyLocation);
         return btn;
     }
-});
+});

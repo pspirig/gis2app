@@ -8,3 +8,6 @@ __pycache__/
 # Editor / System
 .vscode/
 .DS_Store
+
+# OSM-Fussnetz (wird vom Backend heruntergeladen, gross)
+backend/data/

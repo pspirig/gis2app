@@ -43,9 +43,20 @@ def get_engine():
     return _engine
 
 
-def read_sql(query):
-    """Führt eine SELECT-Abfrage aus und gibt das Ergebnis als pandas-DataFrame zurück."""
-    return pd.read_sql(query, get_engine())
+def read_sql(query, params=None):
+    """Führt eine SELECT-Abfrage aus und gibt das Ergebnis als pandas-DataFrame zurück.
+
+    Werte nie direkt in den SQL-Text einsetzen, sondern als params übergeben:
+        read_sql("SELECT * FROM t WHERE id = %(id)s", params={"id": 5})
+    """
+    return pd.read_sql(query, get_engine(), params=params)
+
+
+def execute(query, params=None):
+    """Führt eine schreibende Abfrage aus (INSERT, UPDATE, DELETE).
+    Die Änderung wird sofort gespeichert (commit). Parameter wie bei read_sql."""
+    with get_engine().begin() as conn:
+        conn.exec_driver_sql(query, params or {})
 
 
 def test_connection():
