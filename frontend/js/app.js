@@ -110,7 +110,31 @@ function onload() {
     initOptionsSheet();
     initTrackBar();
     initOnboarding();
+    loadReportsFromDB();
 }
+
+// ------- Meldungen aller User aus der Datenbank anzeigen -------
+function loadReportsFromDB() {
+    dbLoadReports()
+        .then(function (reports) {
+            reports.forEach(function (r) {
+                L.marker([r.lat, r.lng], { icon: flagIconFull })
+                    .bindPopup("<b>" + escapeXml(r.category || "Ohne Kategorie") + "</b>")
+                    .addTo(appState.reports);
+            });
+            console.log(reports.length + " Meldungen aus der Datenbank geladen");
+        })
+        .catch(function (err) {
+            console.error(err);
+            showToast("Meldungen konnten nicht geladen werden.");
+        });
+}
+
+
+
+
+
+
 
 // ------- NEU: Später erfassen (leere Flagge) -------
 const flagIconFull = L.divIcon({ className: 'report-flag', html: '<i class="fa-solid fa-flag"></i>', iconSize: [24,24], iconAnchor: [5,22], popupAnchor: [6,-22] });
@@ -128,7 +152,7 @@ function initNewReport() {
         isFilled: false, marker: null
     };
 
-    // Leeren Marker zeichnen
+   // Leeren Marker zeichnen
     let marker = L.marker([appState.latLng.lat, appState.latLng.lng], { icon: flagIconEmpty }).addTo(appState.reports);
     appState.pendingReports[rId].marker = marker;
     
@@ -542,4 +566,4 @@ const LocateControl = L.Control.extend({
         L.DomEvent.on(btn, 'click', goToMyLocation);
         return btn;
     }
-});
+});

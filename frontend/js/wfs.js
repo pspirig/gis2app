@@ -55,6 +55,48 @@ function dbInsertTrack(track) {
     });
 }
 
+// ------- Meldungen aus der Datenbank laden (alle User) -------
+//
+// Holt alle Meldungen über den GeoServer (WFS GetFeature).
+// Mit propertyName fragen wir NUR die Kategorie und den Ort ab –
+// Kein user_id, track_id und Zeit
+//
+// Gibt ein Promise zurück: Liste von { lat, lng, category }
+
+function dbLoadReports() {
+    // Platzhalter-Modus: es gibt keine Datenbank → leere Liste
+    if (!WFS_CONFIG.enabled) return Promise.resolve([]);
+
+    return new Promise(function (resolve, reject) {
+        $.ajax({
+            type: "GET",
+            url: WFS_CONFIG.url,
+            dataType: "json",
+            data: {
+                service: "WFS",
+                version: "1.0.0",            // 1.0.0: Koordinaten immer als Länge, Breite
+                request: "GetFeature",
+                typeName: WFS_CONFIG.workspace + ":" + WFS_CONFIG.layers.report,
+                propertyName: "reason_category,geometry",
+                outputFormat: "application/json"
+            },
+            success: function (geojson) {
+                let reports = (geojson.features || [])
+                    .filter(f => f.geometry && f.geometry.type === "Point")
+                    .map(f => ({
+                        lng: f.geometry.coordinates[0],
+                        lat: f.geometry.coordinates[1],
+                        category: f.properties.reason_category || null
+                    }));
+                resolve(reports);
+            },
+            error: function (xhr) {
+                reject(new Error("Meldungen konnten nicht geladen werden (HTTP-Status " + xhr.status + ")"));
+            }
+        });
+    });
+}
+
 
 // ------- Ablauf: Platzhalter oder echter Insert -------
 

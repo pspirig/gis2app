@@ -10,14 +10,14 @@
 //   3. enabled = true setzen
 
 const WFS_CONFIG = {
-    enabled: false,
+    enabled: true,
 
     // TODO: Workspace-Namen im Link anpassen
-    url: "https://baug-ikg-gis-01.ethz.ch:8443/geoserver/GTA26_g1/wfs",
+    url: "https://baug-ikg-gis-01.ethz.ch:8443/geoserver/GTA26_project/wfs",
 
     // TODO: Name und Namespace-URI des Workspace im GeoServer
-    workspace: "GTA26_g1",
-    namespaceUri: "https://www.gis.ethz.ch/GTA26_g1",
+    workspace: "GTA26_project",
+    namespaceUri: "https://www.gis.ethz.ch/GTA26_project",
 
     // Name der Layer im GeoServer (entspricht meist dem Tabellennamen)
     layers: {
