@@ -111,6 +111,7 @@ function onload() {
     initTrackBar();
     initOnboarding();
     loadReportsFromDB();
+    loadPastTracks();
 }
 
 // ------- Meldungen aller User aus der Datenbank anzeigen -------
@@ -127,6 +128,24 @@ function loadReportsFromDB() {
         .catch(function (err) {
             console.error(err);
             showToast("Meldungen konnten nicht geladen werden.");
+        });
+}
+
+// ------- Eigene vergangene Wege anzeigen -------
+function loadPastTracks() {
+    appState.pastTracks.clearLayers();
+    if (!appState.user || appState.user.user_id === null) return;
+
+    dbLoadTracks(appState.user.user_id)
+        .then(function (tracks) {
+            tracks.forEach(function (parts) {
+                L.polyline(parts, { color: '#8a93a8', weight: 4, opacity: 0.8 }).addTo(appState.pastTracks);
+            });
+            console.log(tracks.length + " vergangene Wege geladen");
+        })
+        .catch(function (err) {
+            console.error(err);
+            showToast("Vergangene Wege konnten nicht geladen werden.");
         });
 }
 
@@ -332,6 +351,7 @@ function stopTracking() {
         .then(r => {
             flushTrackReports(r.id);                         // Weg gespeichert → Meldungen mit seiner ID
             if (r.id !== null) requestMapMatching(r.id);     // nur wenn der Weg wirklich in der DB ist
+            loadPastTracks();                                // neuen Weg gleich bei den vergangenen anzeigen
         })
         .catch(e => { console.error(e); flushTrackReports(null); }); // Fehler → Meldungen ohne Weg
 }
