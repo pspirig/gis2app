@@ -98,6 +98,53 @@ function dbLoadReports() {
 }
 
 
+// ------- Eigene vergangene Wege aus der Datenbank laden -------
+//
+// Holt alle Wege mit der user_id des eigenen Profils über den GeoServer (WFS GetFeature).
+// CQL_FILTER wirkt wie ein WHERE in SQL: nur Zeilen mit dieser user_id.
+//
+// Gibt ein Promise zurück: Liste von Wegen, jeder Weg = Liste von Teilstücken,
+// jedes Teilstück = Liste von [lat, lng] (so wie Leaflet es braucht)
+
+function dbLoadTracks(userId) {
+    // Platzhalter-Modus oder (noch) keine user_id → nichts zu laden
+    if (!WFS_CONFIG.enabled || userId === null || userId === undefined) return Promise.resolve([]);
+
+    return new Promise(function (resolve, reject) {
+        $.ajax({
+            type: "GET",
+            url: WFS_CONFIG.url,
+            dataType: "json",
+            data: {
+                service: "WFS",
+                version: "1.0.0",            // 1.0.0: Koordinaten immer als Länge, Breite
+                request: "GetFeature",
+                typeName: WFS_CONFIG.workspace + ":" + WFS_CONFIG.layers.track,
+                CQL_FILTER: "user_id=" + parseInt(userId, 10),
+                propertyName: "geometry",
+                outputFormat: "application/json"
+            },
+            success: function (geojson) {
+                let tracks = (geojson.features || [])
+                    .filter(f => f.geometry)
+                    .map(function (f) {
+                        // MultiLineString: mehrere Teilstücke; LineString: nur eines
+                        let parts = f.geometry.type === "MultiLineString"
+                            ? f.geometry.coordinates
+                            : [f.geometry.coordinates];
+                        // GeoJSON: [Länge, Breite] → Leaflet: [Breite, Länge]
+                        return parts.map(part => part.map(c => [c[1], c[0]]));
+                    });
+                resolve(tracks);
+            },
+            error: function (xhr) {
+                reject(new Error("Wege konnten nicht geladen werden (HTTP-Status " + xhr.status + ")"));
+            }
+        });
+    });
+}
+
+
 // ------- Ablauf: Platzhalter oder echter Insert -------
 
 function insertFeature(layer, properties) {
