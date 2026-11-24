@@ -541,8 +541,8 @@ function saveProfile(user) { try { localStorage.setItem(PROFILE_KEY, JSON.string
 
 // ------- Panel Optionen -------
 function initOptionsSheet() {
-    $("#toggleReports").prop("checked", true); $("#toggleLocation").prop("checked", true); $("#togglePastTracks").prop("checked", true);
-    showLayer(appState.reports, true); showLayer(appState.markers, true); showLayer(appState.pastTracks, true);
+    $("#toggleReports").prop("checked", true); $("#toggleLocation").prop("checked", true); $("#togglePastTracks").prop("checked", false); // vergangene Wege standardmässig aus
+    showLayer(appState.reports, true); showLayer(appState.markers, true); showLayer(appState.pastTracks, false);
 
     $("#sheetHandle").on("click", () => setSheetOpen(!$("#optionsSheet").hasClass("open")));
     let startY = null;
