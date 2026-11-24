@@ -11,3 +11,4 @@ __pycache__/
 
 # OSM-Fussnetz (wird vom Backend heruntergeladen, gross)
 backend/data/
+backend/cache/
