@@ -265,13 +265,15 @@ function requestMapMatching(trackId) {
             .done(res => { console.log("Map Matching:", res); resolve(res); })
             .fail(xhr => {
                 console.warn("Map Matching fehlgeschlagen (HTTP-Status " + xhr.status + "):", xhr.responseJSON || "");
-                resolve(null);
+                resolve({ status: "error", httpStatus: xhr.status });
             });
     });
 }
 
 // Text für die Rückmeldung an die Nutzerin / den Nutzer
 function routeFeedbackText(res) {
+    // 422 = Weg liess sich nicht aufs Netz matchen (zu kurz, zu wenige oder ungenaue GPS-Punkte)
+    if (res && res.httpStatus === 422) return "Dein Weg war zu kurz oder das GPS zu ungenau, um den Umweg zu berechnen.";
     if (!res || res.status !== "ok") return "Der Umweg konnte leider nicht berechnet werden.";
     if (res.circuity_ratio === undefined) return "Kein Umweg berechnet (z. B. weil Start und Ziel am selben Ort liegen).";
     let walked = Math.round(res.matched_length_m), shortest = Math.round(res.shortest_length_m);
