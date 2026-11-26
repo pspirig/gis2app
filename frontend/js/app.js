@@ -130,7 +130,17 @@ function loadReportsFromDB() {
             showToast("Meldungen konnten nicht geladen werden.");
         });
 }
+let trackHintTimeout = null;
+function showTrackHint(ms = 10000) {
+    $("#trackHint").removeClass("hidden");
+    clearTimeout(trackHintTimeout);
+    trackHintTimeout = setTimeout(hideTrackHint, ms);
+}
 
+function hideTrackHint() {
+    clearTimeout(trackHintTimeout);
+    $("#trackHint").addClass("hidden");
+}
 // ------- Eigene vergangene Wege anzeigen -------
 function loadPastTracks() {
     appState.pastTracks.clearLayers();
@@ -330,6 +340,7 @@ function startTrackingUi() {
     clearInterval(appState.timerInterval);
     appState.timerInterval = setInterval(updateTimer, 1000);
     setSheetOpen(false); setTrackUi(true); requestWakeLock();
+    showTrackHint(); // ← hat gefehlt
 }
 
 // NEU: Check Pending Reports before stopping
@@ -474,8 +485,8 @@ function setTrackUi(active) {
     $("#trackBtn").text(active ? "Stop" : "Los");
     $("#timer").toggleClass("hidden", !active);
     $("#discardBtn").toggleClass("hidden", !active); // Mülleimer anzeigen/verstecken
+    if (!active) hideTrackHint(); // ← hat gefehlt
 }
-
 // Storage Functions
 function saveTrack() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ trackStart: appState.trackStart, points: appState.trackPoints, gaps: appState.trackGaps, currentSeg: appState.currentSeg, reports: appState.trackReports, savedAt: Date.now() })); } catch (err) {} }
 function clearSavedTrack() { try { localStorage.removeItem(STORAGE_KEY); } catch (err) {} }
