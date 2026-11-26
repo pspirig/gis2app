@@ -17,6 +17,8 @@ Ablauf von match_track(track_id):
 Das OSM-Netz der Stadt Zürich wird beim ersten Aufruf heruntergeladen
 (dauert einige Minuten) und in data/zurich_walk.graphml gespeichert.
 Danach wird nur noch diese Datei gelesen.
+Wird WALK_FILTER geändert, muss diese Datei gelöscht werden, damit das
+Netz mit dem neuen Filter neu geladen wird.
 """
 import os
 import threading
@@ -40,6 +42,21 @@ CRS_METRIC = "EPSG:2056"  # LV95, Einheit Meter – für alle Berechnungen
 PLACE = "Zürich, Switzerland"
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 GRAPH_FILE = os.path.join(DATA_DIR, "zurich_walk.graphml")
+
+# Welche OSM-Wege zum Fussnetz gehören (Overpass-Filter).
+# Gleich wie der Standard von osmnx für network_type="walk", aber mit zwei Unterschieden:
+#   - Flächen (area=yes, z. B. Fussgängerplätze) sind dabei. Im Graphen wird
+#     eine Fläche nur durch ihren Umriss dargestellt (man läuft dem Rand entlang).
+#   - Velowege (highway=cycleway) sind dabei. In Zürich sind viele kombinierte
+#     Fuss- und Velowege so erfasst, ebenso manche Querungen.
+# Weiterhin ausgeschlossen: Autobahnen ("motor"), Baustellen, private Wege und
+# alle Wege mit foot=no.
+WALK_FILTER = (
+    '["highway"]["access"!~"private"]'
+    '["highway"!~"abandoned|bus_guideway|construction|motor|no|planned|platform|'
+    'proposed|raceway|razed"]'
+    '["foot"!~"no"]["service"!~"private"]'
+)
 
 MIN_POINT_DIST = 10   # m: Punkte, die näher beieinander liegen, werden ausgelassen
 GRAPH_BUFFER = 300    # m: so viel Netz rund um den Weg wird verwendet
@@ -76,7 +93,10 @@ def get_city_graph():
             else:
                 # simplify=False: Jeder Stützpunkt bleibt ein Knoten. Das HMM
                 # behandelt Kanten als gerade Linien, sonst würden Kurven abgeschnitten.
-                G = ox.graph_from_place(PLACE, network_type="walk", simplify=False)
+                # custom_filter bestimmt die Wege, network_type="walk" sorgt dafür,
+                # dass Einbahnstrassen in beide Richtungen begehbar sind.
+                G = ox.graph_from_place(PLACE, network_type="walk",
+                                        custom_filter=WALK_FILTER, simplify=False)
                 G = ox.project_graph(G, to_crs=CRS_METRIC)
                 os.makedirs(DATA_DIR, exist_ok=True)
                 ox.save_graphml(G, GRAPH_FILE)
@@ -100,7 +120,8 @@ def graph_around(geom_metric):
         return G.subgraph(nodes).copy()
 
     area = gpd.GeoSeries([geom_metric.buffer(GRAPH_BUFFER)], crs=CRS_METRIC).to_crs(CRS_WGS84).iloc[0]
-    G_local = ox.graph_from_polygon(area, network_type="walk", simplify=False)
+    G_local = ox.graph_from_polygon(area, network_type="walk",
+                                    custom_filter=WALK_FILTER, simplify=False)
     return ox.project_graph(G_local, to_crs=CRS_METRIC)
 
 
