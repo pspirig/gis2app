@@ -250,14 +250,41 @@ function flushTrackReports(trackId) {
     appState.trackReports = [];
 }
 
+function backendEnabled() {
+    return typeof BACKEND_CONFIG !== "undefined" && BACKEND_CONFIG.enabled;
+}
+
 // Map Matching im Backend anstossen (config.js → BACKEND_CONFIG).
-// Das Backend matcht den Weg auf das OSM-Fussnetz und speichert ihn in matched_track.
-// Die App wartet nicht darauf; das Ergebnis steht nur in der Konsole.
+// Das Backend matcht den Weg auf das OSM-Fussnetz, berechnet den kürzesten Weg
+// und die Circuity Ratio und speichert alles in der Datenbank.
+// Gibt ein Promise zurück: die Antwort des Backends, oder null bei einem Fehler.
 function requestMapMatching(trackId) {
-    if (typeof BACKEND_CONFIG === "undefined" || !BACKEND_CONFIG.enabled) return;
-    $.post(BACKEND_CONFIG.url + "/map_match/" + trackId)
-        .done(res => console.log("Map Matching:", res))
-        .fail(xhr => console.warn("Map Matching fehlgeschlagen (HTTP-Status " + xhr.status + "):", xhr.responseJSON || ""));
+    if (!backendEnabled()) return Promise.resolve(null);
+    return new Promise(resolve => {
+        $.ajax({ url: BACKEND_CONFIG.url + "/map_match/" + trackId, method: "POST", timeout: 180000 })
+            .done(res => { console.log("Map Matching:", res); resolve(res); })
+            .fail(xhr => {
+                console.warn("Map Matching fehlgeschlagen (HTTP-Status " + xhr.status + "):", xhr.responseJSON || "");
+                resolve(null);
+            });
+    });
+}
+
+// Text für die Rückmeldung an die Nutzerin / den Nutzer
+function routeFeedbackText(res) {
+    if (!res || res.status !== "ok") return "Der Umweg konnte leider nicht berechnet werden.";
+    if (res.circuity_ratio === undefined) return "Kein Umweg berechnet (z. B. weil Start und Ziel am selben Ort liegen).";
+    let walked = Math.round(res.matched_length_m), shortest = Math.round(res.shortest_length_m);
+    if (res.detour_percent < 5) return "Du bist fast den kürzesten Weg gegangen (" + walked + " m, kürzester Weg " + shortest + " m).";
+    return "Der kürzeste Weg wäre " + (walked - shortest) + " m kürzer gewesen (" + shortest + " m statt " + walked + " m, " + Math.round(res.detour_percent) + " % Umweg).";
+}
+
+// Zeigt das Ergebnis im Fenster «Weg beendet», falls es noch offen ist, sonst als Hinweis unten.
+function showRouteFeedback(res, summary) {
+    let text = routeFeedbackText(res);
+    let dialogOpen = !$("#dialog").hasClass("hidden") && $("#dialogTitle").text() === "Weg beendet";
+    if (dialogOpen) $("#dialogText").text(summary + "\n\n" + text);
+    else showToast(text, 8000);
 }
 
 // ------- Weg aufzeichnen -------
@@ -341,8 +368,9 @@ function stopTracking() {
         if (points[i].seg === points[i - 1].seg) distance += map.distance([points[i - 1].lat, points[i - 1].lng], [points[i].lat, points[i].lng]);
     }
 
-    showDialog({ title: "Weg beendet", text: "Dauer: " + $("#timer").text() + "\nDistanz: " + Math.round(distance) + " m\nPunkte: " + points.length });
-    
+    let summary = "Dauer: " + $("#timer").text() + "\nDistanz: " + Math.round(distance) + " m";
+    showDialog({ title: "Weg beendet", text: summary + (backendEnabled() ? "\n\nUmweg wird berechnet …" : "") });
+
     dbInsertTrack({
         userId: appState.user ? appState.user.user_id : null,
         startTime: new Date(appState.trackStart).toISOString(),
@@ -350,10 +378,14 @@ function stopTracking() {
     })
         .then(r => {
             flushTrackReports(r.id);                         // Weg gespeichert → Meldungen mit seiner ID
-            if (r.id !== null) requestMapMatching(r.id);     // nur wenn der Weg wirklich in der DB ist
+            if (r.id !== null) requestMapMatching(r.id).then(res => { if (backendEnabled()) showRouteFeedback(res, summary); });
+            else if (backendEnabled()) showRouteFeedback(null, summary);
             loadPastTracks();                                // neuen Weg gleich bei den vergangenen anzeigen
         })
-        .catch(e => { console.error(e); flushTrackReports(null); }); // Fehler → Meldungen ohne Weg
+        .catch(e => {
+            console.error(e); flushTrackReports(null);       // Fehler → Meldungen ohne Weg
+            if (backendEnabled()) showRouteFeedback(null, summary);
+        });
 }
 
 // NEU: Weg verwerfen

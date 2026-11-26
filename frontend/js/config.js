@@ -42,8 +42,6 @@ const WFS_CONFIG = {
 // sein, sonst blockiert der Browser die Anfrage.
 
 const BACKEND_CONFIG = {
-    enabled: false,
-
-    // Lokal: http://localhost:8989 – auf dem Server: eure Adresse und Port-Nummer
-    url: "http://localhost:8989"
+    enabled: true,
+    url: "https://gta-project.ethz.ch/group1/api"
 };
